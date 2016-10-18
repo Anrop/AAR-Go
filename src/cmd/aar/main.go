@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
@@ -18,6 +19,7 @@ const newRelicAppName = "AAR"
 func main() {
 	port := os.Getenv("PORT")
 	databaseURL := os.Getenv("DATABASE_URL")
+	maxDatabaseConnections, _ := strconv.Atoi(os.Getenv("MAX_DATABASE_CONNECTIONS"))
 	newRelicLicenseKey := os.Getenv("NEW_RELIC_LICENSE_KEY")
 
 	if port == "" {
@@ -26,7 +28,16 @@ func main() {
 
 	var err error
 	pgConfig, err := pgx.ParseURI(databaseURL)
-	aar.DB, err = pgx.Connect(pgConfig)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Invalid database url: %q", err)
+		os.Exit(1)
+	}
+
+	poolConfig := pgx.ConnPoolConfig{
+		ConnConfig:     pgConfig,
+		MaxConnections: maxDatabaseConnections,
+	}
+	aar.DB, err = pgx.NewConnPool(poolConfig)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error opening database: %q", err)
 		os.Exit(1)
