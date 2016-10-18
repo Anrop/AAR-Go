@@ -1,5 +1,41 @@
 ## ChangeLog
 
+## 1.4.0
+
+* Added support for slow query traces.  Slow datastore segments will now
+ generate slow query traces viewable on the datastore tab.  These traces include
+ a stack trace and help you to debug slow datastore activity.
+ [Slow Query Documentation](https://docs.newrelic.com/docs/apm/applications-menu/monitoring/viewing-slow-query-details)
+
+* Added new
+[DatastoreSegment](https://godoc.org/github.com/newrelic/go-agent#DatastoreSegment)
+fields `ParameterizedQuery`, `QueryParameters`, `Host`, `PortPathOrID`, and
+`DatabaseName`.  These fields will be shown in transaction traces and in slow
+query traces.
+
+## 1.3.0
+
+* Breaking Change: Added a timeout parameter to the `Application.Shutdown` method.
+
+## 1.2.0
+
+* Added support for instrumenting short-lived processes:
+  * The new `Application.Shutdown` method allows applications to report
+    data to New Relic without waiting a full minute.
+  * The new `Application.WaitForConnection` method allows your process to
+    defer instrumentation until the application is connected and ready to
+    gather data.
+  * Full documentation here: [application.go](application.go)
+  * Example short-lived process: [examples/short-lived-process/main.go](examples/short-lived-process/main.go)
+
+* Error metrics are no longer created when `ErrorCollector.Enabled = false`.
+
+* Added support for [github.com/mgutz/logxi](github.com/mgutz/logxi).  See
+  [_integrations/nrlogxi/v1/nrlogxi.go](_integrations/nrlogxi/v1/nrlogxi.go).
+
+* Fixed bug where Transaction Trace thresholds based upon Apdex were not being
+  applied to background transactions.
+
 ## 1.1.0
 
 * Added support for Transaction Traces.
@@ -31,7 +67,7 @@
   goal of being easier to use and to avoid nil Transaction checks.  See:
 
   * [segments.go](segments.go)
-  * [example/main.go](example/main.go)
+  * [examples/server/main.go](examples/server/main.go)
   * [GUIDE.md#segments](GUIDE.md#segments)
 
 * Updated LICENSE.txt with contribution information.

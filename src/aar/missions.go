@@ -87,6 +87,11 @@ func outputMission(missionID string, w http.ResponseWriter) error {
 }
 
 func MissionsHandler(w http.ResponseWriter, r *http.Request) {
+	if newRelic != nil {
+		txn := (*newRelic).StartTransaction(r.URL.String(), w, r)
+		defer txn.End()
+	}
+
 	if err := outputMissions(w); err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		fmt.Fprintf(os.Stderr, "Error reading missions: %v", err)
@@ -94,6 +99,11 @@ func MissionsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func MissionHandler(w http.ResponseWriter, r *http.Request) {
+	if newRelic != nil {
+		txn := (*newRelic).StartTransaction(r.URL.String(), w, r)
+		defer txn.End()
+	}
+
 	params := mux.Vars(r)
 	missionID := params["missionId"]
 

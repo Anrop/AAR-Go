@@ -15,6 +15,7 @@ type Harvest struct {
 	ErrorEvents  *errorEvents
 	ErrorTraces  *harvestErrors
 	TxnTraces    *harvestTraces
+	SlowSQLs     *slowQueries
 }
 
 // Payloads returns a map from expected collector method name to data type.
@@ -26,6 +27,7 @@ func (h *Harvest) Payloads() map[string]PayloadCreator {
 		cmdErrorEvents:  h.ErrorEvents,
 		cmdErrorData:    h.ErrorTraces,
 		cmdTxnTraces:    h.TxnTraces,
+		cmdSlowSQLs:     h.SlowSQLs,
 	}
 }
 
@@ -38,6 +40,7 @@ func NewHarvest(now time.Time) *Harvest {
 		ErrorEvents:  newErrorEvents(maxErrorEvents),
 		ErrorTraces:  newHarvestErrors(maxHarvestErrors),
 		TxnTraces:    newHarvestTraces(),
+		SlowSQLs:     newSlowQueries(maxHarvestSlowSQLs),
 	}
 }
 
@@ -79,7 +82,7 @@ type CreateTxnMetricsArgs struct {
 	Name           string
 	Zone           ApdexZone
 	ApdexThreshold time.Duration
-	ErrorsSeen     uint64
+	HasErrors      bool
 	Queueing       time.Duration
 }
 
@@ -104,7 +107,7 @@ func CreateTxnMetrics(args CreateTxnMetricsArgs, metrics *metricTable) {
 	}
 
 	// Error Metrics
-	if args.ErrorsSeen > 0 {
+	if args.HasErrors {
 		metrics.addSingleCount(errorsAll, forced)
 		if args.IsWeb {
 			metrics.addSingleCount(errorsWeb, forced)

@@ -14,11 +14,60 @@ import (
 
 type traceNodeHeap []traceNode
 
+// traceNodeParams is used for trace node parameters.  A struct is used in place
+// of a map[string]interface{} to facilitate testing and reduce JSON Marshal
+// overhead.  If too many fields get added here, it probably makes sense to
+// start using a map.  This struct is not embedded into traceNode to minimize
+// the size of traceNode:  Not all nodes will have parameters.
+type traceNodeParams struct {
+	StackTrace      *StackTrace
+	CleanURL        string
+	Database        string
+	Host            string
+	PortPathOrID    string
+	Query           string
+	queryParameters queryParameters
+}
+
+func (p *traceNodeParams) WriteJSON(buf *bytes.Buffer) {
+	w := jsonFieldsWriter{buf: buf}
+	buf.WriteByte('{')
+	if nil != p.StackTrace {
+		w.writerField("backtrace", p.StackTrace)
+	}
+	if "" != p.CleanURL {
+		w.stringField("uri", p.CleanURL)
+	}
+	if "" != p.Database {
+		w.stringField("database_name", p.Database)
+	}
+	if "" != p.Host {
+		w.stringField("host", p.Host)
+	}
+	if "" != p.PortPathOrID {
+		w.stringField("port_path_or_id", p.PortPathOrID)
+	}
+	if "" != p.Query {
+		w.stringField("query", p.Query)
+	}
+	if nil != p.queryParameters {
+		w.writerField("query_parameters", p.queryParameters)
+	}
+	buf.WriteByte('}')
+}
+
+// MarshalJSON is used for testing.
+func (p *traceNodeParams) MarshalJSON() ([]byte, error) {
+	buf := &bytes.Buffer{}
+	p.WriteJSON(buf)
+	return buf.Bytes(), nil
+}
+
 type traceNode struct {
 	start    segmentTime
 	stop     segmentTime
 	duration time.Duration
-	params   map[string]interface{}
+	params   *traceNodeParams
 	name     string
 }
 
@@ -45,7 +94,7 @@ func (trace *TxnTrace) considerNode(end segmentEnd) bool {
 	return trace.Enabled && (end.duration >= trace.SegmentThreshold)
 }
 
-func (trace *TxnTrace) witnessNode(end segmentEnd, name string, params map[string]interface{}) {
+func (trace *TxnTrace) witnessNode(end segmentEnd, name string, params *traceNodeParams) {
 	node := traceNode{
 		start:    end.start,
 		stop:     end.stop,
@@ -65,7 +114,8 @@ func (trace *TxnTrace) witnessNode(end segmentEnd, name string, params map[strin
 	}
 	if end.exclusive >= trace.StackTraceThreshold {
 		if node.params == nil {
-			node.params = make(map[string]interface{})
+			p := new(traceNodeParams)
+			node.params = p
 		}
 		// skip the following stack frames:
 		//   this method
@@ -73,7 +123,7 @@ func (trace *TxnTrace) witnessNode(end segmentEnd, name string, params map[strin
 		//   function in internal_txn.go (endSegment, endExternal, endDatastore)
 		//   segment end method
 		skip := 4
-		node.params["backtrace"] = GetStackTrace(skip)
+		node.params.StackTrace = GetStackTrace(skip)
 	}
 	if len(trace.nodes) < cap(trace.nodes) {
 		trace.nodes = append(trace.nodes, node)
@@ -107,12 +157,8 @@ type nodeDetails struct {
 	name          string
 	relativeStart time.Duration
 	relativeStop  time.Duration
-	params        map[string]interface{}
+	params        *traceNodeParams
 }
-
-var (
-	emptyParams = []byte("{}")
-)
 
 func printNodeStart(buf *bytes.Buffer, n nodeDetails) {
 	// time.Seconds() is intentionally not used here.  Millisecond
@@ -127,13 +173,11 @@ func printNodeStart(buf *bytes.Buffer, n nodeDetails) {
 	buf.WriteByte(',')
 	jsonx.AppendString(buf, n.name)
 	buf.WriteByte(',')
-	js := emptyParams
-	if nil != n.params {
-		if j, err := json.Marshal(n.params); nil == err {
-			js = j
-		}
+	if nil == n.params {
+		buf.WriteString("{}")
+	} else {
+		n.params.WriteJSON(buf)
 	}
-	buf.Write(js)
 	buf.WriteByte(',')
 	buf.WriteByte('[')
 }

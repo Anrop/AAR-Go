@@ -1,12 +1,14 @@
 package internal
 
 import (
-	"encoding/json"
+	"bytes"
 	"fmt"
 	"net/http"
 	"reflect"
 	"strconv"
 	"time"
+
+	"github.com/newrelic/go-agent/internal/jsonx"
 )
 
 const (
@@ -25,24 +27,27 @@ func panicValueMsg(v interface{}) string {
 }
 
 // TxnErrorFromPanic creates a new TxnError from a panic.
-func TxnErrorFromPanic(v interface{}) TxnError {
+func TxnErrorFromPanic(now time.Time, v interface{}) TxnError {
 	return TxnError{
+		When:  now,
 		Msg:   panicValueMsg(v),
 		Klass: PanicErrorKlass,
 	}
 }
 
 // TxnErrorFromError creates a new TxnError from an error.
-func TxnErrorFromError(err error) TxnError {
+func TxnErrorFromError(now time.Time, err error) TxnError {
 	return TxnError{
+		When:  now,
 		Msg:   err.Error(),
 		Klass: reflect.TypeOf(err).String(),
 	}
 }
 
 // TxnErrorFromResponseCode creates a new TxnError from an http response code.
-func TxnErrorFromResponseCode(code int) TxnError {
+func TxnErrorFromResponseCode(now time.Time, code int) TxnError {
 	return TxnError{
+		When:  now,
 		Msg:   http.StatusText(code),
 		Klass: strconv.Itoa(code),
 	}
@@ -65,32 +70,48 @@ func NewTxnErrors(max int) TxnErrors {
 }
 
 // Add adds a TxnError.
-func (errors *TxnErrors) Add(e *TxnError) {
+func (errors *TxnErrors) Add(e TxnError) {
 	if len(*errors) < cap(*errors) {
-		*errors = append(*errors, e)
+		*errors = append(*errors, &e)
 	}
 }
 
+func (h *harvestError) WriteJSON(buf *bytes.Buffer) {
+	buf.WriteByte('[')
+	jsonx.AppendFloat(buf, timeToFloatMilliseconds(h.When))
+	buf.WriteByte(',')
+	jsonx.AppendString(buf, h.txnName)
+	buf.WriteByte(',')
+	jsonx.AppendString(buf, h.Msg)
+	buf.WriteByte(',')
+	jsonx.AppendString(buf, h.Klass)
+	buf.WriteByte(',')
+	buf.WriteByte('{')
+	w := jsonFieldsWriter{buf: buf}
+	if nil != h.Stack {
+		w.writerField("stack_trace", h.Stack)
+	}
+	w.writerField("agentAttributes", agentAttributesJSONWriter{
+		attributes: h.attrs,
+		dest:       destError,
+	})
+	w.writerField("userAttributes", userAttributesJSONWriter{
+		attributes: h.attrs,
+		dest:       destError,
+	})
+	w.rawField("intrinsics", JSONString("{}"))
+	if h.requestURI != "" {
+		w.stringField("request_uri", h.requestURI)
+	}
+	buf.WriteByte('}')
+	buf.WriteByte(']')
+}
+
+// MarshalJSON is used for testing.
 func (h *harvestError) MarshalJSON() ([]byte, error) {
-	return json.Marshal(
-		[]interface{}{
-			timeToFloatMilliseconds(h.When),
-			h.txnName,
-			h.Msg,
-			h.Klass,
-			struct {
-				Stack      *StackTrace `json:"stack_trace"`
-				Agent      JSONString  `json:"agentAttributes"`
-				User       JSONString  `json:"userAttributes"`
-				Intrinsics struct{}    `json:"intrinsics"`
-				RequestURI string      `json:"request_uri,omitempty"`
-			}{
-				Stack:      h.Stack,
-				User:       userAttributesStringJSON(h.attrs, destError),
-				Agent:      agentAttributesStringJSON(h.attrs, destError),
-				RequestURI: h.requestURI,
-			},
-		})
+	buf := &bytes.Buffer{}
+	h.WriteJSON(buf)
+	return buf.Bytes(), nil
 }
 
 type harvestError struct {
@@ -138,7 +159,21 @@ func (errors *harvestErrors) Data(agentRunID string, harvestStart time.Time) ([]
 	if 0 == len(errors.errors) {
 		return nil, nil
 	}
-	return json.Marshal([]interface{}{agentRunID, errors.errors})
+	estimate := 1024 * len(errors.errors)
+	buf := bytes.NewBuffer(make([]byte, 0, estimate))
+	buf.WriteByte('[')
+	jsonx.AppendString(buf, agentRunID)
+	buf.WriteByte(',')
+	buf.WriteByte('[')
+	for i, e := range errors.errors {
+		if i > 0 {
+			buf.WriteByte(',')
+		}
+		e.WriteJSON(buf)
+	}
+	buf.WriteByte(']')
+	buf.WriteByte(']')
+	return buf.Bytes(), nil
 }
 
 func (errors *harvestErrors) MergeIntoHarvest(h *Harvest) {}

@@ -307,9 +307,6 @@ func TestNoticeErrorLocallyDisabled(t *testing.T) {
 	app.ExpectMetrics(t, []internal.WantMetric{
 		{"OtherTransaction/Go/myName", "", true, nil},
 		{"OtherTransaction/all", "", true, nil},
-		{"Errors/all", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/allOther", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/OtherTransaction/Go/myName", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
 	})
 }
 
@@ -327,9 +324,6 @@ func TestNoticeErrorRemotelyDisabled(t *testing.T) {
 	app.ExpectMetrics(t, []internal.WantMetric{
 		{"OtherTransaction/Go/myName", "", true, nil},
 		{"OtherTransaction/all", "", true, nil},
-		{"Errors/all", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/allOther", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/OtherTransaction/Go/myName", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
 	})
 }
 
@@ -1114,6 +1108,7 @@ func TestTraceDatastore(t *testing.T) {
 		{"Datastore/operation/MySQL/SELECT", "", false, nil},
 		{"Datastore/statement/MySQL/my_table/SELECT", "", false, nil},
 		{"Datastore/statement/MySQL/my_table/SELECT", "WebTransaction/Go/myName", false, nil},
+		{"Datastore/instance/MySQL/unknown/unknown", "", false, nil},
 	})
 	app.ExpectErrorEvents(t, []internal.WantErrorEvent{{
 		TxnName:            "WebTransaction/Go/myName",
@@ -1154,6 +1149,7 @@ func TestTraceDatastoreBackground(t *testing.T) {
 		{"Datastore/operation/MySQL/SELECT", "", false, nil},
 		{"Datastore/statement/MySQL/my_table/SELECT", "", false, nil},
 		{"Datastore/statement/MySQL/my_table/SELECT", "OtherTransaction/Go/myName", false, nil},
+		{"Datastore/instance/MySQL/unknown/unknown", "", false, nil},
 	})
 	app.ExpectErrorEvents(t, []internal.WantErrorEvent{{
 		TxnName:            "OtherTransaction/Go/myName",
@@ -1193,6 +1189,7 @@ func TestTraceDatastoreMissingProductOperationCollection(t *testing.T) {
 		{"Datastore/Unknown/allWeb", "", true, nil},
 		{"Datastore/operation/Unknown/other", "", false, nil},
 		{"Datastore/operation/Unknown/other", "WebTransaction/Go/myName", false, nil},
+		{"Datastore/instance/Unknown/unknown/unknown", "", false, nil},
 	})
 	app.ExpectErrorEvents(t, []internal.WantErrorEvent{{
 		TxnName:            "WebTransaction/Go/myName",
@@ -1488,6 +1485,13 @@ func TestRoundTripper(t *testing.T) {
 func TestTraceBelowThreshold(t *testing.T) {
 	app := testApp(nil, nil, t)
 	txn := app.StartTransaction("myName", nil, helloRequest)
+	txn.End()
+	app.ExpectTxnTraces(t, []internal.WantTxnTrace{})
+}
+
+func TestTraceBelowThresholdBackground(t *testing.T) {
+	app := testApp(nil, nil, t)
+	txn := app.StartTransaction("myName", nil, nil)
 	txn.End()
 	app.ExpectTxnTraces(t, []internal.WantTxnTrace{})
 }

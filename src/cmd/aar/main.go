@@ -11,10 +11,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/jackc/pgx"
 	_ "github.com/joho/godotenv/autoload"
-	newrelic "github.com/newrelic/go-agent"
 )
-
-const newRelicAppName = "AAR"
 
 func main() {
 	port := os.Getenv("PORT")
@@ -53,15 +50,7 @@ func main() {
 	handler = handlers.CompressHandler(handler)
 
 	if newRelicLicenseKey != "" {
-		config := newrelic.NewConfig(newRelicAppName, newRelicLicenseKey)
-		app, err := newrelic.NewApplication(config)
-
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error starting New Relic: %q", err)
-			os.Exit(1)
-		}
-
-		_, handler = newrelic.WrapHandle(app, "/", handler)
+		aar.SetupNewRelic(newRelicLicenseKey)
 	}
 
 	// Bind to a port and pass our router in
