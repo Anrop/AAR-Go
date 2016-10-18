@@ -14,6 +14,8 @@ Environment variables can be specified in `.env` file and will be autoloaded
 
 Set `DATABASE_URL` as a postgres url to your AAR DATABASE_URL
 
+`MAX_DATABASE_CONNECTIONS` can be defined and is 2 by default
+
 `PORT` can be defined and is 8080 by default
 
 Start the API with the aar binary in the bin folder

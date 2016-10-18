@@ -5,5 +5,5 @@ import (
 )
 
 var (
-	DB *pgx.Conn
+	DB *pgx.ConnPool
 )
