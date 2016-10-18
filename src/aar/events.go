@@ -5,11 +5,19 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 
 	"github.com/gorilla/mux"
 )
 
-func outputEvents(missionID string, w http.ResponseWriter) error {
+func outputEvents(missionID int, limit int, offset int, w http.ResponseWriter) error {
+	// nil value for limitStr queries all events
+	var limitStr *string
+	if limit > 0 {
+		limitVal := strconv.Itoa(limit)
+		limitStr = &limitVal
+	}
+
 	rows, err := DB.Query(`
 		SELECT
 			id,
@@ -18,7 +26,9 @@ func outputEvents(missionID string, w http.ResponseWriter) error {
 		FROM events
 		WHERE mission_id = $1
 		ORDER BY timestamp ASC
-	`, missionID)
+		LIMIT $2
+		OFFSET $3
+	`, missionID, limitStr, offset)
 
 	if err != nil {
 		return err
@@ -61,9 +71,17 @@ func outputEvents(missionID string, w http.ResponseWriter) error {
 
 func EventsHandler(w http.ResponseWriter, r *http.Request) {
 	params := mux.Vars(r)
-	missionID := params["missionId"]
+	missionID, err := strconv.Atoi(params["missionId"])
+	if err != nil {
+		http.Error(w, "Invalid mission id", http.StatusBadRequest)
+		fmt.Fprintf(os.Stderr, "Error parsing mission id: %v", err)
+		return
+	}
 
-	if err := outputEvents(missionID, w); err != nil {
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+
+	if err := outputEvents(missionID, limit, offset, w); err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		fmt.Fprintf(os.Stderr, "Error reading events: %v", err)
 	}
