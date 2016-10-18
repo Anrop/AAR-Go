@@ -25,3 +25,6 @@ _testmain.go
 # gb specific folders
 bin
 pkg
+
+# Dotenv file
+.env

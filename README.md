@@ -10,6 +10,8 @@ Code is written in [Go](https://golang.org/) and uses [gb](https://getgb.io/) to
 
 Compile the sources with `gb build`
 
+Environment variables can be specified in `.env` file and will be autoloaded
+
 Set `DATABASE_URL` as a postgres url to your AAR DATABASE_URL
 
 `PORT` can be defined and is 8080 by default

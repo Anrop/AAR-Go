@@ -9,6 +9,7 @@ import (
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	"github.com/jackc/pgx"
+	_ "github.com/joho/godotenv/autoload"
 	newrelic "github.com/newrelic/go-agent"
 )
 
