@@ -46,7 +46,7 @@
 		{
 			"importpath": "github.com/newrelic/go-agent",
 			"repository": "https://github.com/newrelic/go-agent",
-			"revision": "a923caa59930cbb1b27d2a9fb2d5663d9e5c637c",
+			"revision": "372845e16294c9fa73951b27d5631b601643fc51",
 			"branch": "master"
 		},
 		{

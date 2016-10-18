@@ -3,6 +3,7 @@ package internal
 import (
 	"encoding/json"
 	"errors"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -26,7 +27,6 @@ func TestErrorTraceMarshal(t *testing.T) {
 		"my_msg",
 		"my_class",
 		{
-			"stack_trace":null,
 			"agentAttributes":{},
 			"userAttributes":{},
 			"intrinsics":{},
@@ -67,7 +67,6 @@ func TestErrorTraceAttributes(t *testing.T) {
 		"my_msg",
 		"my_class",
 		{
-			"stack_trace":null,
 			"agentAttributes":{"request.method":"GET"},
 			"userAttributes":{"zip":456},
 			"intrinsics":{},
@@ -83,24 +82,12 @@ func TestErrorsLifecycle(t *testing.T) {
 	ers := NewTxnErrors(5)
 
 	when := time.Date(2014, time.November, 28, 1, 1, 0, 0, time.UTC)
-	e1 := TxnErrorFromError(errors.New("hello"))
-	e2 := TxnErrorFromResponseCode(400)
-	e3 := TxnErrorFromPanic(errors.New("oh no panic"))
-	e4 := TxnErrorFromPanic(123)
-	e5 := TxnErrorFromError(errors.New("too many errors, dropped in harvest"))
-	e6 := TxnErrorFromError(errors.New("too many errors, dropped in transaction"))
-	e1.When = when
-	e2.When = when
-	e3.When = when
-	e4.When = when
-	e5.When = when
-	e6.When = when
-	ers.Add(&e1)
-	ers.Add(&e2)
-	ers.Add(&e3)
-	ers.Add(&e4)
-	ers.Add(&e5)
-	ers.Add(&e6)
+	ers.Add(TxnErrorFromError(when, errors.New("hello")))
+	ers.Add(TxnErrorFromResponseCode(when, 400))
+	ers.Add(TxnErrorFromPanic(when, errors.New("oh no panic")))
+	ers.Add(TxnErrorFromPanic(when, 123))
+	ers.Add(TxnErrorFromError(when, errors.New("too many errors, dropped in harvest")))
+	ers.Add(TxnErrorFromError(when, errors.New("too many errors, dropped in transaction")))
 
 	he := newHarvestErrors(4)
 	MergeTxnErrors(he, ers, "txnName", "requestURI", nil)
@@ -118,7 +105,6 @@ func TestErrorsLifecycle(t *testing.T) {
          "hello",
          "*errors.errorString",
          {
-            "stack_trace":null,
             "agentAttributes":{},
             "userAttributes":{},
             "intrinsics":{},
@@ -131,7 +117,6 @@ func TestErrorsLifecycle(t *testing.T) {
          "Bad Request",
          "400",
          {
-            "stack_trace":null,
             "agentAttributes":{},
             "userAttributes":{},
             "intrinsics":{},
@@ -144,7 +129,6 @@ func TestErrorsLifecycle(t *testing.T) {
          "oh no panic",
          "panic",
          {
-            "stack_trace":null,
             "agentAttributes":{},
             "userAttributes":{},
             "intrinsics":{},
@@ -157,7 +141,6 @@ func TestErrorsLifecycle(t *testing.T) {
          "123",
          "panic",
          {
-            "stack_trace":null,
             "agentAttributes":{},
             "userAttributes":{},
             "intrinsics":{},
@@ -167,6 +150,34 @@ func TestErrorsLifecycle(t *testing.T) {
    ]
 ]`)
 	if string(js) != expect {
-		t.Error(string(js))
+		t.Error(string(js), expect)
+	}
+}
+
+func BenchmarkErrorsJSON(b *testing.B) {
+	when := time.Date(2014, time.November, 28, 1, 1, 0, 0, time.UTC)
+	max := 20
+	ers := NewTxnErrors(max)
+
+	for i := 0; i < max; i++ {
+		ers.Add(TxnErrorFromError(when, errors.New(strconv.Itoa(i))))
+	}
+
+	cfg := CreateAttributeConfig(sampleAttributeConfigInput)
+	attr := NewAttributes(cfg)
+	attr.Agent.RequestMethod = "GET"
+	AddUserAttribute(attr, "zip", 456, DestAll)
+
+	he := newHarvestErrors(max)
+	MergeTxnErrors(he, ers, "WebTransaction/Go/hello", "/url", attr)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for n := 0; n < b.N; n++ {
+		js, err := he.Data("agentRundID", when)
+		if nil != err || nil == js {
+			b.Fatal(err, js)
+		}
 	}
 }

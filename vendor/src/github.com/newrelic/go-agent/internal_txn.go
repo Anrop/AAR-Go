@@ -26,15 +26,14 @@ type txn struct {
 	sync.Mutex
 	// finished indicates whether or not End() has been called.  After
 	// finished has been set to true, no recording should occur.
-	finished   bool
-	queuing    time.Duration
-	start      time.Time
-	name       string // Work in progress name
-	isWeb      bool
-	ignore     bool
-	errors     internal.TxnErrors // Lazily initialized.
-	errorsSeen uint64
-	attrs      *internal.Attributes
+	finished bool
+	queuing  time.Duration
+	start    time.Time
+	name     string // Work in progress name
+	isWeb    bool
+	ignore   bool
+	errors   internal.TxnErrors // Lazily initialized.
+	attrs    *internal.Attributes
 
 	// Fields relating to tracing and breakdown metrics/segments.
 	tracer internal.Tracer
@@ -67,8 +66,16 @@ func newTxn(input txnInput, name string) *txn {
 	txn.tracer.Enabled = txn.txnTracesEnabled()
 	txn.tracer.SegmentThreshold = txn.Config.TransactionTracer.SegmentThreshold
 	txn.tracer.StackTraceThreshold = txn.Config.TransactionTracer.StackTraceThreshold
+	txn.tracer.SlowQueriesEnabled = txn.slowQueriesEnabled()
+	txn.tracer.SlowQueryThreshold = txn.Config.DatastoreTracer.SlowQuery.Threshold
+	txn.tracer.InstanceReportingDisabled = !txn.Config.DatastoreTracer.InstanceReporting.Enabled
 
 	return txn
+}
+
+func (txn *txn) slowQueriesEnabled() bool {
+	return txn.Config.DatastoreTracer.SlowQuery.Enabled &&
+		txn.Reply.CollectTraces
 }
 
 func (txn *txn) txnTracesEnabled() bool {
@@ -113,6 +120,10 @@ func (txn *txn) shouldSaveTrace() bool {
 		(txn.duration >= txn.txnTraceThreshold())
 }
 
+func (txn *txn) hasErrors() bool {
+	return len(txn.errors) > 0
+}
+
 func (txn *txn) MergeIntoHarvest(h *internal.Harvest) {
 	exclusive := time.Duration(0)
 	children := internal.TracerRootChildren(&txn.tracer)
@@ -127,7 +138,7 @@ func (txn *txn) MergeIntoHarvest(h *internal.Harvest) {
 		Name:           txn.finalName,
 		Zone:           txn.zone,
 		ApdexThreshold: txn.apdexThreshold,
-		ErrorsSeen:     txn.errorsSeen,
+		HasErrors:      txn.hasErrors(),
 		Queueing:       txn.queuing,
 	}, h.Metrics)
 
@@ -180,6 +191,10 @@ func (txn *txn) MergeIntoHarvest(h *internal.Harvest) {
 			Attrs:                txn.attrs,
 		})
 	}
+
+	if nil != txn.tracer.SlowQueries {
+		h.SlowSQLs.Merge(txn.tracer.SlowQueries, txn.finalName, requestURI)
+	}
 }
 
 func responseCodeIsError(cfg *Config, code int) bool {
@@ -207,7 +222,7 @@ func headersJustWritten(txn *txn, code int) {
 	internal.ResponseCodeAttribute(txn.attrs, code)
 
 	if responseCodeIsError(&txn.Config, code) {
-		e := internal.TxnErrorFromResponseCode(code)
+		e := internal.TxnErrorFromResponseCode(time.Now(), code)
 		e.Stack = internal.GetStackTrace(1)
 		txn.noticeErrorInternal(e)
 	}
@@ -247,7 +262,7 @@ func (txn *txn) End() error {
 
 	r := recover()
 	if nil != r {
-		e := internal.TxnErrorFromPanic(r)
+		e := internal.TxnErrorFromPanic(time.Now(), r)
 		e.Stack = internal.GetStackTrace(0)
 		txn.noticeErrorInternal(e)
 	}
@@ -256,9 +271,13 @@ func (txn *txn) End() error {
 	txn.duration = txn.stop.Sub(txn.start)
 
 	txn.freezeName()
+
+	// Assign apdexThreshold regardless of whether or not the transaction
+	// gets apdex since it may be used to calculate the trace threshold.
+	txn.apdexThreshold = internal.CalculateApdexThreshold(txn.Reply, txn.finalName)
+
 	if txn.getsApdex() {
-		txn.apdexThreshold = internal.CalculateApdexThreshold(txn.Reply, txn.finalName)
-		if txn.errorsSeen > 0 {
+		if txn.hasErrors() {
 			txn.zone = internal.ApdexFailing
 		} else {
 			txn.zone = internal.CalculateApdexZone(txn.apdexThreshold, txn.duration)
@@ -312,10 +331,6 @@ const (
 )
 
 func (txn *txn) noticeErrorInternal(err internal.TxnError) error {
-	// Increment errorsSeen even if errors are disabled:  Error metrics do
-	// not depend on whether or not errors are enabled.
-	txn.errorsSeen++
-
 	if !txn.Config.ErrorCollector.Enabled {
 		return errorsLocallyDisabled
 	}
@@ -332,9 +347,7 @@ func (txn *txn) noticeErrorInternal(err internal.TxnError) error {
 		err.Msg = highSecurityErrorMsg
 	}
 
-	err.When = time.Now()
-
-	txn.errors.Add(&err)
+	txn.errors.Add(err)
 
 	return nil
 }
@@ -351,7 +364,7 @@ func (txn *txn) NoticeError(err error) error {
 		return errNilError
 	}
 
-	e := internal.TxnErrorFromError(err)
+	e := internal.TxnErrorFromError(time.Now(), err)
 	e.Stack = internal.GetStackTrace(2)
 	return txn.noticeErrorInternal(e)
 }
@@ -422,10 +435,27 @@ func endDatastore(s DatastoreSegment) {
 	if txn.finished {
 		return
 	}
-	internal.EndDatastoreSegment(&txn.tracer, s.StartTime.start, time.Now(), internal.DatastoreMetricKey{
-		Product:    string(s.Product),
-		Collection: s.Collection,
-		Operation:  s.Operation,
+	if txn.Config.HighSecurity {
+		s.QueryParameters = nil
+	}
+	if !txn.Config.DatastoreTracer.QueryParameters.Enabled {
+		s.QueryParameters = nil
+	}
+	if !txn.Config.DatastoreTracer.DatabaseNameReporting.Enabled {
+		s.DatabaseName = ""
+	}
+	internal.EndDatastoreSegment(internal.EndDatastoreParams{
+		Tracer:             &txn.tracer,
+		Start:              s.StartTime.start,
+		Now:                time.Now(),
+		Product:            string(s.Product),
+		Collection:         s.Collection,
+		Operation:          s.Operation,
+		ParameterizedQuery: s.ParameterizedQuery,
+		QueryParameters:    s.QueryParameters,
+		Host:               s.Host,
+		PortPathOrID:       s.PortPathOrID,
+		Database:           s.DatabaseName,
 	})
 }
 
