@@ -71,7 +71,7 @@ func outputEvents(missionID int, limit int, offset int, w http.ResponseWriter) e
 
 func EventsHandler(w http.ResponseWriter, r *http.Request) {
 	if newRelic != nil {
-		txn := (*newRelic).StartTransaction(r.URL.String(), w, r)
+		txn := (*newRelic).StartTransaction(r.URL.Path, w, r)
 		defer txn.End()
 	}
 
