@@ -88,7 +88,7 @@ func outputMission(missionID string, w http.ResponseWriter) error {
 
 func MissionsHandler(w http.ResponseWriter, r *http.Request) {
 	if newRelic != nil {
-		txn := (*newRelic).StartTransaction(r.URL.String(), w, r)
+		txn := (*newRelic).StartTransaction(r.URL.Path, w, r)
 		defer txn.End()
 	}
 
@@ -100,7 +100,7 @@ func MissionsHandler(w http.ResponseWriter, r *http.Request) {
 
 func MissionHandler(w http.ResponseWriter, r *http.Request) {
 	if newRelic != nil {
-		txn := (*newRelic).StartTransaction(r.URL.String(), w, r)
+		txn := (*newRelic).StartTransaction(r.URL.Path, w, r)
 		defer txn.End()
 	}
 
