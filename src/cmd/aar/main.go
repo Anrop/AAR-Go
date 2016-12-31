@@ -44,6 +44,9 @@ func main() {
 	r.HandleFunc("/missions", aar.MissionsHandler)
 	r.HandleFunc("/missions/{missionId}", aar.MissionHandler)
 	r.HandleFunc("/missions/{missionId}/events", aar.EventsHandler)
+	r.HandleFunc("/missions/{missionId}/players", aar.MissionPlayersHandler)
+	r.HandleFunc("/players", aar.PlayersHandler)
+	r.HandleFunc("/players/{playerId}/missions", aar.PlayerMissionsHandler)
 
 	var handler http.Handler
 	handler = handlers.CORS()(r)
