@@ -1,8 +1,9 @@
 package pgx_test
 
 import (
-	"github.com/jackc/pgx"
 	"testing"
+
+	"github.com/jackc/pgx"
 )
 
 func mustConnect(t testing.TB, config pgx.ConnConfig) *pgx.Conn {
@@ -13,7 +14,22 @@ func mustConnect(t testing.TB, config pgx.ConnConfig) *pgx.Conn {
 	return conn
 }
 
+func mustReplicationConnect(t testing.TB, config pgx.ConnConfig) *pgx.ReplicationConn {
+	conn, err := pgx.ReplicationConnect(config)
+	if err != nil {
+		t.Fatalf("Unable to establish connection: %v", err)
+	}
+	return conn
+}
+
 func closeConn(t testing.TB, conn *pgx.Conn) {
+	err := conn.Close()
+	if err != nil {
+		t.Fatalf("conn.Close unexpectedly failed: %v", err)
+	}
+}
+
+func closeReplicationConn(t testing.TB, conn *pgx.ReplicationConn) {
 	err := conn.Close()
 	if err != nil {
 		t.Fatalf("conn.Close unexpectedly failed: %v", err)

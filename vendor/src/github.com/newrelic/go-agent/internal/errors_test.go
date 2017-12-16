@@ -3,19 +3,28 @@ package internal
 import (
 	"encoding/json"
 	"errors"
-	"strconv"
 	"testing"
 	"time"
 )
 
+var (
+	emptyStackTrace = make([]uintptr, 0)
+)
+
 func TestErrorTraceMarshal(t *testing.T) {
-	e := &TxnError{
-		When:  time.Date(2014, time.November, 28, 1, 1, 0, 0, time.UTC),
-		Stack: nil,
-		Msg:   "my_msg",
-		Klass: "my_class",
+	he := &tracedError{
+		ErrorData: ErrorData{
+			When:  time.Date(2014, time.November, 28, 1, 1, 0, 0, time.UTC),
+			Stack: emptyStackTrace,
+			Msg:   "my_msg",
+			Klass: "my_class",
+		},
+		TxnEvent: TxnEvent{
+			FinalName: "my_txn_name",
+			CleanURL:  "my_request_uri",
+			Attrs:     nil,
+		},
 	}
-	he := harvestErrorFromTxnError(e, "my_txn_name", "my_request_uri", nil)
 	js, err := json.Marshal(he)
 	if nil != err {
 		t.Error(err)
@@ -30,6 +39,7 @@ func TestErrorTraceMarshal(t *testing.T) {
 			"agentAttributes":{},
 			"userAttributes":{},
 			"intrinsics":{},
+			"stack_trace":[],
 			"request_uri":"my_request_uri"
 		}
 	]`)
@@ -49,13 +59,19 @@ func TestErrorTraceAttributes(t *testing.T) {
 	AddUserAttribute(attr, "zap", 123, DestAll)
 	AddUserAttribute(attr, "zip", 456, DestAll)
 
-	e := &TxnError{
-		When:  time.Date(2014, time.November, 28, 1, 1, 0, 0, time.UTC),
-		Stack: nil,
-		Msg:   "my_msg",
-		Klass: "my_class",
+	he := &tracedError{
+		ErrorData: ErrorData{
+			When:  time.Date(2014, time.November, 28, 1, 1, 0, 0, time.UTC),
+			Stack: nil,
+			Msg:   "my_msg",
+			Klass: "my_class",
+		},
+		TxnEvent: TxnEvent{
+			FinalName: "my_txn_name",
+			CleanURL:  "my_request_uri",
+			Attrs:     attr,
+		},
 	}
-	he := harvestErrorFromTxnError(e, "my_txn_name", "my_request_uri", attr)
 	js, err := json.Marshal(he)
 	if nil != err {
 		t.Error(err)
@@ -82,15 +98,17 @@ func TestErrorsLifecycle(t *testing.T) {
 	ers := NewTxnErrors(5)
 
 	when := time.Date(2014, time.November, 28, 1, 1, 0, 0, time.UTC)
-	ers.Add(TxnErrorFromError(when, errors.New("hello")))
 	ers.Add(TxnErrorFromResponseCode(when, 400))
 	ers.Add(TxnErrorFromPanic(when, errors.New("oh no panic")))
 	ers.Add(TxnErrorFromPanic(when, 123))
-	ers.Add(TxnErrorFromError(when, errors.New("too many errors, dropped in harvest")))
-	ers.Add(TxnErrorFromError(when, errors.New("too many errors, dropped in transaction")))
+	ers.Add(TxnErrorFromPanic(when, 123))
 
-	he := newHarvestErrors(4)
-	MergeTxnErrors(he, ers, "txnName", "requestURI", nil)
+	he := newHarvestErrors(3)
+	MergeTxnErrors(&he, ers, TxnEvent{
+		FinalName: "txnName",
+		CleanURL:  "requestURI",
+		Attrs:     nil,
+	})
 	js, err := he.Data("agentRunID", time.Now())
 	if nil != err {
 		t.Error(err)
@@ -99,18 +117,6 @@ func TestErrorsLifecycle(t *testing.T) {
 [
    "agentRunID",
    [
-      [
-         1.41713646e+12,
-         "txnName",
-         "hello",
-         "*errors.errorString",
-         {
-            "agentAttributes":{},
-            "userAttributes":{},
-            "intrinsics":{},
-            "request_uri":"requestURI"
-         }
-      ],
       [
          1.41713646e+12,
          "txnName",
@@ -160,7 +166,11 @@ func BenchmarkErrorsJSON(b *testing.B) {
 	ers := NewTxnErrors(max)
 
 	for i := 0; i < max; i++ {
-		ers.Add(TxnErrorFromError(when, errors.New(strconv.Itoa(i))))
+		ers.Add(ErrorData{
+			When:  time.Date(2014, time.November, 28, 1, 1, 0, 0, time.UTC),
+			Msg:   "error message",
+			Klass: "error class",
+		})
 	}
 
 	cfg := CreateAttributeConfig(sampleAttributeConfigInput)
@@ -169,7 +179,11 @@ func BenchmarkErrorsJSON(b *testing.B) {
 	AddUserAttribute(attr, "zip", 456, DestAll)
 
 	he := newHarvestErrors(max)
-	MergeTxnErrors(he, ers, "WebTransaction/Go/hello", "/url", attr)
+	MergeTxnErrors(&he, ers, TxnEvent{
+		FinalName: "WebTransaction/Go/hello",
+		CleanURL:  "/url",
+		Attrs:     attr,
+	})
 
 	b.ReportAllocs()
 	b.ResetTimer()

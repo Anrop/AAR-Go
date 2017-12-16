@@ -2,12 +2,38 @@ package newrelic
 
 import (
 	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/newrelic/go-agent/internal"
+)
+
+var (
+	singleCount = []float64{1, 0, 0, 0, 0, 0, 0}
+	webMetrics  = []internal.WantMetric{
+		{Name: "WebTransaction/Go/hello", Scope: "", Forced: true, Data: nil},
+		{Name: "WebTransaction", Scope: "", Forced: true, Data: nil},
+		{Name: "HttpDispatcher", Scope: "", Forced: true, Data: nil},
+		{Name: "Apdex", Scope: "", Forced: true, Data: nil},
+		{Name: "Apdex/Go/hello", Scope: "", Forced: false, Data: nil},
+	}
+	webErrorMetrics = append([]internal.WantMetric{
+		{Name: "Errors/all", Scope: "", Forced: true, Data: singleCount},
+		{Name: "Errors/allWeb", Scope: "", Forced: true, Data: singleCount},
+		{Name: "Errors/WebTransaction/Go/hello", Scope: "", Forced: true, Data: singleCount},
+	}, webMetrics...)
+	backgroundMetrics = []internal.WantMetric{
+		{Name: "OtherTransaction/Go/hello", Scope: "", Forced: true, Data: nil},
+		{Name: "OtherTransaction/all", Scope: "", Forced: true, Data: nil},
+	}
+	backgroundErrorMetrics = append([]internal.WantMetric{
+		{Name: "Errors/all", Scope: "", Forced: true, Data: singleCount},
+		{Name: "Errors/allOther", Scope: "", Forced: true, Data: singleCount},
+		{Name: "Errors/OtherTransaction/Go/hello", Scope: "", Forced: true, Data: singleCount},
+	}, backgroundMetrics...)
 )
 
 // compatibleResponseRecorder wraps ResponseRecorder to ensure consistent behavior
@@ -108,7 +134,13 @@ func TestRecordCustomEventSuccess(t *testing.T) {
 	if nil != err {
 		t.Error(err)
 	}
-	app.ExpectCustomEvents(t, []internal.WantCustomEvent{{"myType", validParams}})
+	app.ExpectCustomEvents(t, []internal.WantEvent{{
+		Intrinsics: map[string]interface{}{
+			"type":      "myType",
+			"timestamp": internal.MatchAnything,
+		},
+		UserAttributes: validParams,
+	}})
 }
 
 func TestRecordCustomEventHighSecurityEnabled(t *testing.T) {
@@ -118,7 +150,7 @@ func TestRecordCustomEventHighSecurityEnabled(t *testing.T) {
 	if err != errHighSecurityEnabled {
 		t.Error(err)
 	}
-	app.ExpectCustomEvents(t, []internal.WantCustomEvent{})
+	app.ExpectCustomEvents(t, []internal.WantEvent{})
 }
 
 func TestRecordCustomEventEventsDisabled(t *testing.T) {
@@ -128,7 +160,7 @@ func TestRecordCustomEventEventsDisabled(t *testing.T) {
 	if err != errCustomEventsDisabled {
 		t.Error(err)
 	}
-	app.ExpectCustomEvents(t, []internal.WantCustomEvent{})
+	app.ExpectCustomEvents(t, []internal.WantEvent{})
 }
 
 func TestRecordCustomEventBadInput(t *testing.T) {
@@ -137,7 +169,7 @@ func TestRecordCustomEventBadInput(t *testing.T) {
 	if err != internal.ErrEventTypeRegex {
 		t.Error(err)
 	}
-	app.ExpectCustomEvents(t, []internal.WantCustomEvent{})
+	app.ExpectCustomEvents(t, []internal.WantEvent{})
 }
 
 func TestRecordCustomEventRemoteDisable(t *testing.T) {
@@ -147,7 +179,51 @@ func TestRecordCustomEventRemoteDisable(t *testing.T) {
 	if err != errCustomEventsRemoteDisabled {
 		t.Error(err)
 	}
-	app.ExpectCustomEvents(t, []internal.WantCustomEvent{})
+	app.ExpectCustomEvents(t, []internal.WantEvent{})
+}
+
+func TestRecordCustomMetricSuccess(t *testing.T) {
+	app := testApp(nil, nil, t)
+	err := app.RecordCustomMetric("myMetric", 123.0)
+	if nil != err {
+		t.Error(err)
+	}
+	expectData := []float64{1, 123.0, 123.0, 123.0, 123.0, 123.0 * 123.0}
+	app.ExpectMetrics(t, []internal.WantMetric{
+		{Name: "Custom/myMetric", Scope: "", Forced: false, Data: expectData},
+	})
+}
+
+func TestRecordCustomMetricNameEmpty(t *testing.T) {
+	app := testApp(nil, nil, t)
+	err := app.RecordCustomMetric("", 123.0)
+	if err != errMetricNameEmpty {
+		t.Error(err)
+	}
+}
+
+func TestRecordCustomMetricNaN(t *testing.T) {
+	app := testApp(nil, nil, t)
+	err := app.RecordCustomMetric("myMetric", math.NaN())
+	if err != errMetricNaN {
+		t.Error(err)
+	}
+}
+
+func TestRecordCustomMetricPositiveInf(t *testing.T) {
+	app := testApp(nil, nil, t)
+	err := app.RecordCustomMetric("myMetric", math.Inf(0))
+	if err != errMetricInf {
+		t.Error(err)
+	}
+}
+
+func TestRecordCustomMetricNegativeInf(t *testing.T) {
+	app := testApp(nil, nil, t)
+	err := app.RecordCustomMetric("myMetric", math.Inf(-1))
+	if err != errMetricInf {
+		t.Error(err)
+	}
 }
 
 type sampleResponseWriter struct {
@@ -168,7 +244,7 @@ func TestTxnResponseWriter(t *testing.T) {
 		header: make(http.Header),
 	}
 	app := testApp(nil, nil, t)
-	txn := app.StartTransaction("myName", w, nil)
+	txn := app.StartTransaction("hello", w, nil)
 	w.header.Add("zip", "zap")
 	if out := txn.Header(); out.Get("zip") != "zap" {
 		t.Error(out.Get("zip"))
@@ -182,261 +258,55 @@ func TestTxnResponseWriter(t *testing.T) {
 	}
 }
 
-type myError struct{}
-
-func (e myError) Error() string { return "my msg" }
-
-func TestNoticeErrorBackground(t *testing.T) {
-	app := testApp(nil, nil, t)
-	txn := app.StartTransaction("myName", nil, nil)
-	err := txn.NoticeError(myError{})
-	if nil != err {
-		t.Error(err)
-	}
-	txn.End()
-	app.ExpectErrors(t, []internal.WantError{{
-		TxnName: "OtherTransaction/Go/myName",
-		Msg:     "my msg",
-		Klass:   "newrelic.myError",
-		Caller:  "go-agent.TestNoticeErrorBackground",
-		URL:     "",
-	}})
-	app.ExpectErrorEvents(t, []internal.WantErrorEvent{{
-		TxnName: "OtherTransaction/Go/myName",
-		Msg:     "my msg",
-		Klass:   "newrelic.myError",
-	}})
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"OtherTransaction/Go/myName", "", true, nil},
-		{"OtherTransaction/all", "", true, nil},
-		{"Errors/all", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/allOther", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/OtherTransaction/Go/myName", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-	})
-}
-
-func TestNoticeErrorWeb(t *testing.T) {
-	app := testApp(nil, nil, t)
-	txn := app.StartTransaction("myName", nil, helloRequest)
-	err := txn.NoticeError(myError{})
-	if nil != err {
-		t.Error(err)
-	}
-	txn.End()
-	app.ExpectErrors(t, []internal.WantError{{
-		TxnName: "WebTransaction/Go/myName",
-		Msg:     "my msg",
-		Klass:   "newrelic.myError",
-		Caller:  "go-agent.TestNoticeErrorWeb",
-		URL:     "/hello",
-	}})
-	app.ExpectErrorEvents(t, []internal.WantErrorEvent{{
-		TxnName: "WebTransaction/Go/myName",
-		Msg:     "my msg",
-		Klass:   "newrelic.myError",
-	}})
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"WebTransaction/Go/myName", "", true, nil},
-		{"WebTransaction", "", true, nil},
-		{"HttpDispatcher", "", true, nil},
-		{"Apdex", "", true, nil},
-		{"Apdex/Go/myName", "", false, nil},
-		{"Errors/all", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/allWeb", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/WebTransaction/Go/myName", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-	})
-}
-
-func TestNoticeErrorTxnEnded(t *testing.T) {
-	app := testApp(nil, nil, t)
-	txn := app.StartTransaction("myName", nil, nil)
-	txn.End()
-	err := txn.NoticeError(myError{})
-	if err != errAlreadyEnded {
-		t.Error(err)
-	}
-	txn.End()
-	app.ExpectErrors(t, []internal.WantError{})
-	app.ExpectErrorEvents(t, []internal.WantErrorEvent{})
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"OtherTransaction/Go/myName", "", true, nil},
-		{"OtherTransaction/all", "", true, nil},
-	})
-}
-
-func TestNoticeErrorHighSecurity(t *testing.T) {
-	cfgFn := func(cfg *Config) { cfg.HighSecurity = true }
-	app := testApp(nil, cfgFn, t)
-	txn := app.StartTransaction("myName", nil, nil)
-	err := txn.NoticeError(myError{})
-	if nil != err {
-		t.Error(err)
-	}
-	txn.End()
-	app.ExpectErrors(t, []internal.WantError{{
-		TxnName: "OtherTransaction/Go/myName",
-		Msg:     highSecurityErrorMsg,
-		Klass:   "newrelic.myError",
-		Caller:  "go-agent.TestNoticeErrorHighSecurity",
-	}})
-	app.ExpectErrorEvents(t, []internal.WantErrorEvent{{
-		TxnName: "OtherTransaction/Go/myName",
-		Msg:     highSecurityErrorMsg,
-		Klass:   "newrelic.myError",
-	}})
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"OtherTransaction/Go/myName", "", true, nil},
-		{"OtherTransaction/all", "", true, nil},
-		{"Errors/all", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/allOther", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/OtherTransaction/Go/myName", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-	})
-}
-
-func TestNoticeErrorLocallyDisabled(t *testing.T) {
-	cfgFn := func(cfg *Config) { cfg.ErrorCollector.Enabled = false }
-	app := testApp(nil, cfgFn, t)
-	txn := app.StartTransaction("myName", nil, nil)
-	err := txn.NoticeError(myError{})
-	if errorsLocallyDisabled != err {
-		t.Error(err)
-	}
-	txn.End()
-	app.ExpectErrors(t, []internal.WantError{})
-	app.ExpectErrorEvents(t, []internal.WantErrorEvent{})
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"OtherTransaction/Go/myName", "", true, nil},
-		{"OtherTransaction/all", "", true, nil},
-	})
-}
-
-func TestNoticeErrorRemotelyDisabled(t *testing.T) {
-	replyfn := func(reply *internal.ConnectReply) { reply.CollectErrors = false }
-	app := testApp(replyfn, nil, t)
-	txn := app.StartTransaction("myName", nil, nil)
-	err := txn.NoticeError(myError{})
-	if errorsRemotelyDisabled != err {
-		t.Error(err)
-	}
-	txn.End()
-	app.ExpectErrors(t, []internal.WantError{})
-	app.ExpectErrorEvents(t, []internal.WantErrorEvent{})
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"OtherTransaction/Go/myName", "", true, nil},
-		{"OtherTransaction/all", "", true, nil},
-	})
-}
-
-func TestNoticeErrorNil(t *testing.T) {
-	app := testApp(nil, nil, t)
-	txn := app.StartTransaction("myName", nil, nil)
-	err := txn.NoticeError(nil)
-	if errNilError != err {
-		t.Error(err)
-	}
-	txn.End()
-	app.ExpectErrors(t, []internal.WantError{})
-	app.ExpectErrorEvents(t, []internal.WantErrorEvent{})
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"OtherTransaction/Go/myName", "", true, nil},
-		{"OtherTransaction/all", "", true, nil},
-	})
-}
-
-func TestNoticeErrorEventsLocallyDisabled(t *testing.T) {
-	cfgFn := func(cfg *Config) { cfg.ErrorCollector.CaptureEvents = false }
-	app := testApp(nil, cfgFn, t)
-	txn := app.StartTransaction("myName", nil, nil)
-	err := txn.NoticeError(myError{})
-	if nil != err {
-		t.Error(err)
-	}
-	txn.End()
-	app.ExpectErrors(t, []internal.WantError{{
-		TxnName: "OtherTransaction/Go/myName",
-		Msg:     "my msg",
-		Klass:   "newrelic.myError",
-		Caller:  "go-agent.TestNoticeErrorEventsLocallyDisabled",
-	}})
-	app.ExpectErrorEvents(t, []internal.WantErrorEvent{})
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"OtherTransaction/Go/myName", "", true, nil},
-		{"OtherTransaction/all", "", true, nil},
-		{"Errors/all", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/allOther", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/OtherTransaction/Go/myName", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-	})
-}
-
-func TestNoticeErrorEventsRemotelyDisabled(t *testing.T) {
-	replyfn := func(reply *internal.ConnectReply) { reply.CollectErrorEvents = false }
-	app := testApp(replyfn, nil, t)
-	txn := app.StartTransaction("myName", nil, nil)
-	err := txn.NoticeError(myError{})
-	if nil != err {
-		t.Error(err)
-	}
-	txn.End()
-	app.ExpectErrors(t, []internal.WantError{{
-		TxnName: "OtherTransaction/Go/myName",
-		Msg:     "my msg",
-		Klass:   "newrelic.myError",
-		Caller:  "go-agent.TestNoticeErrorEventsRemotelyDisabled",
-	}})
-	app.ExpectErrorEvents(t, []internal.WantErrorEvent{})
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"OtherTransaction/Go/myName", "", true, nil},
-		{"OtherTransaction/all", "", true, nil},
-		{"Errors/all", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/allOther", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/OtherTransaction/Go/myName", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-	})
-}
-
 func TestTransactionEventWeb(t *testing.T) {
 	app := testApp(nil, nil, t)
-	txn := app.StartTransaction("myName", nil, helloRequest)
+	txn := app.StartTransaction("hello", nil, helloRequest)
 	err := txn.End()
 	if nil != err {
 		t.Error(err)
 	}
-	app.ExpectTxnEvents(t, []internal.WantTxnEvent{
-		{Name: "WebTransaction/Go/myName", Zone: "S"},
-	})
+	app.ExpectTxnEvents(t, []internal.WantEvent{{
+		Intrinsics: map[string]interface{}{
+			"name":             "WebTransaction/Go/hello",
+			"nr.apdexPerfZone": "S",
+		},
+	}})
 }
 
 func TestTransactionEventBackground(t *testing.T) {
 	app := testApp(nil, nil, t)
-	txn := app.StartTransaction("myName", nil, nil)
+	txn := app.StartTransaction("hello", nil, nil)
 	err := txn.End()
 	if nil != err {
 		t.Error(err)
 	}
-	app.ExpectTxnEvents(t, []internal.WantTxnEvent{
-		{Name: "OtherTransaction/Go/myName"},
-	})
+	app.ExpectTxnEvents(t, []internal.WantEvent{{
+		Intrinsics: map[string]interface{}{
+			"name": "OtherTransaction/Go/hello",
+		},
+	}})
 }
 
 func TestTransactionEventLocallyDisabled(t *testing.T) {
 	cfgFn := func(cfg *Config) { cfg.TransactionEvents.Enabled = false }
 	app := testApp(nil, cfgFn, t)
-	txn := app.StartTransaction("myName", nil, helloRequest)
+	txn := app.StartTransaction("hello", nil, helloRequest)
 	err := txn.End()
 	if nil != err {
 		t.Error(err)
 	}
-	app.ExpectTxnEvents(t, []internal.WantTxnEvent{})
+	app.ExpectTxnEvents(t, []internal.WantEvent{})
 }
 
 func TestTransactionEventRemotelyDisabled(t *testing.T) {
 	replyfn := func(reply *internal.ConnectReply) { reply.CollectAnalyticsEvents = false }
 	app := testApp(replyfn, nil, t)
-	txn := app.StartTransaction("myName", nil, helloRequest)
+	txn := app.StartTransaction("hello", nil, helloRequest)
 	err := txn.End()
 	if nil != err {
 		t.Error(err)
 	}
-	app.ExpectTxnEvents(t, []internal.WantTxnEvent{})
+	app.ExpectTxnEvents(t, []internal.WantEvent{})
 }
 
 func myErrorHandler(w http.ResponseWriter, req *http.Request) {
@@ -465,21 +335,14 @@ func TestWrapHandleFunc(t *testing.T) {
 		Caller:  "go-agent.myErrorHandler",
 		URL:     "/hello",
 	}})
-	app.ExpectErrorEvents(t, []internal.WantErrorEvent{{
-		TxnName: "WebTransaction/Go/hello",
-		Msg:     "my msg",
-		Klass:   "newrelic.myError",
+	app.ExpectErrorEvents(t, []internal.WantEvent{{
+		Intrinsics: map[string]interface{}{
+			"error.class":     "newrelic.myError",
+			"error.message":   "my msg",
+			"transactionName": "WebTransaction/Go/hello",
+		},
 	}})
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"WebTransaction/Go/hello", "", true, nil},
-		{"WebTransaction", "", true, nil},
-		{"HttpDispatcher", "", true, nil},
-		{"Apdex", "", true, nil},
-		{"Apdex/Go/hello", "", false, nil},
-		{"Errors/all", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/allWeb", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/WebTransaction/Go/hello", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-	})
+	app.ExpectMetrics(t, webErrorMetrics)
 }
 
 func TestWrapHandle(t *testing.T) {
@@ -501,27 +364,20 @@ func TestWrapHandle(t *testing.T) {
 		Caller:  "go-agent.myErrorHandler",
 		URL:     "/hello",
 	}})
-	app.ExpectErrorEvents(t, []internal.WantErrorEvent{{
-		TxnName: "WebTransaction/Go/hello",
-		Msg:     "my msg",
-		Klass:   "newrelic.myError",
+	app.ExpectErrorEvents(t, []internal.WantEvent{{
+		Intrinsics: map[string]interface{}{
+			"error.class":     "newrelic.myError",
+			"error.message":   "my msg",
+			"transactionName": "WebTransaction/Go/hello",
+		},
 	}})
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"WebTransaction/Go/hello", "", true, nil},
-		{"WebTransaction", "", true, nil},
-		{"HttpDispatcher", "", true, nil},
-		{"Apdex", "", true, nil},
-		{"Apdex/Go/hello", "", false, nil},
-		{"Errors/all", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/allWeb", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/WebTransaction/Go/hello", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-	})
+	app.ExpectMetrics(t, webErrorMetrics)
 }
 
 func TestSetName(t *testing.T) {
 	app := testApp(nil, nil, t)
 	txn := app.StartTransaction("one", nil, nil)
-	if err := txn.SetName("two"); nil != err {
+	if err := txn.SetName("hello"); nil != err {
 		t.Error(err)
 	}
 	txn.End()
@@ -529,10 +385,7 @@ func TestSetName(t *testing.T) {
 		t.Error(err)
 	}
 
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"OtherTransaction/Go/two", "", true, nil},
-		{"OtherTransaction/all", "", true, nil},
-	})
+	app.ExpectMetrics(t, backgroundMetrics)
 }
 
 func deferEndPanic(txn Transaction, panicMe interface{}) (r interface{}) {
@@ -547,7 +400,7 @@ func deferEndPanic(txn Transaction, panicMe interface{}) (r interface{}) {
 
 func TestPanicError(t *testing.T) {
 	app := testApp(nil, nil, t)
-	txn := app.StartTransaction("myName", nil, nil)
+	txn := app.StartTransaction("hello", nil, nil)
 
 	e := myError{}
 	r := deferEndPanic(txn, e)
@@ -556,29 +409,25 @@ func TestPanicError(t *testing.T) {
 	}
 
 	app.ExpectErrors(t, []internal.WantError{{
-		TxnName: "OtherTransaction/Go/myName",
+		TxnName: "OtherTransaction/Go/hello",
 		Msg:     "my msg",
 		Klass:   internal.PanicErrorKlass,
 		Caller:  "go-agent.(*txn).End",
 		URL:     "",
 	}})
-	app.ExpectErrorEvents(t, []internal.WantErrorEvent{{
-		TxnName: "OtherTransaction/Go/myName",
-		Msg:     "my msg",
-		Klass:   internal.PanicErrorKlass,
+	app.ExpectErrorEvents(t, []internal.WantEvent{{
+		Intrinsics: map[string]interface{}{
+			"error.class":     internal.PanicErrorKlass,
+			"error.message":   "my msg",
+			"transactionName": "OtherTransaction/Go/hello",
+		},
 	}})
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"OtherTransaction/Go/myName", "", true, nil},
-		{"OtherTransaction/all", "", true, nil},
-		{"Errors/all", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/allOther", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/OtherTransaction/Go/myName", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-	})
+	app.ExpectMetrics(t, backgroundErrorMetrics)
 }
 
 func TestPanicString(t *testing.T) {
 	app := testApp(nil, nil, t)
-	txn := app.StartTransaction("myName", nil, nil)
+	txn := app.StartTransaction("hello", nil, nil)
 
 	e := "my string"
 	r := deferEndPanic(txn, e)
@@ -587,29 +436,25 @@ func TestPanicString(t *testing.T) {
 	}
 
 	app.ExpectErrors(t, []internal.WantError{{
-		TxnName: "OtherTransaction/Go/myName",
+		TxnName: "OtherTransaction/Go/hello",
 		Msg:     "my string",
 		Klass:   internal.PanicErrorKlass,
 		Caller:  "go-agent.(*txn).End",
 		URL:     "",
 	}})
-	app.ExpectErrorEvents(t, []internal.WantErrorEvent{{
-		TxnName: "OtherTransaction/Go/myName",
-		Msg:     "my string",
-		Klass:   internal.PanicErrorKlass,
+	app.ExpectErrorEvents(t, []internal.WantEvent{{
+		Intrinsics: map[string]interface{}{
+			"error.class":     internal.PanicErrorKlass,
+			"error.message":   "my string",
+			"transactionName": "OtherTransaction/Go/hello",
+		},
 	}})
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"OtherTransaction/Go/myName", "", true, nil},
-		{"OtherTransaction/all", "", true, nil},
-		{"Errors/all", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/allOther", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/OtherTransaction/Go/myName", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-	})
+	app.ExpectMetrics(t, backgroundErrorMetrics)
 }
 
 func TestPanicInt(t *testing.T) {
 	app := testApp(nil, nil, t)
-	txn := app.StartTransaction("myName", nil, nil)
+	txn := app.StartTransaction("hello", nil, nil)
 
 	e := 22
 	r := deferEndPanic(txn, e)
@@ -618,29 +463,25 @@ func TestPanicInt(t *testing.T) {
 	}
 
 	app.ExpectErrors(t, []internal.WantError{{
-		TxnName: "OtherTransaction/Go/myName",
+		TxnName: "OtherTransaction/Go/hello",
 		Msg:     "22",
 		Klass:   internal.PanicErrorKlass,
 		Caller:  "go-agent.(*txn).End",
 		URL:     "",
 	}})
-	app.ExpectErrorEvents(t, []internal.WantErrorEvent{{
-		TxnName: "OtherTransaction/Go/myName",
-		Msg:     "22",
-		Klass:   internal.PanicErrorKlass,
+	app.ExpectErrorEvents(t, []internal.WantEvent{{
+		Intrinsics: map[string]interface{}{
+			"error.class":     internal.PanicErrorKlass,
+			"error.message":   "22",
+			"transactionName": "OtherTransaction/Go/hello",
+		},
 	}})
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"OtherTransaction/Go/myName", "", true, nil},
-		{"OtherTransaction/all", "", true, nil},
-		{"Errors/all", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/allOther", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/OtherTransaction/Go/myName", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-	})
+	app.ExpectMetrics(t, backgroundErrorMetrics)
 }
 
 func TestPanicNil(t *testing.T) {
 	app := testApp(nil, nil, t)
-	txn := app.StartTransaction("myName", nil, nil)
+	txn := app.StartTransaction("hello", nil, nil)
 
 	r := deferEndPanic(txn, nil)
 	if nil != r {
@@ -648,11 +489,8 @@ func TestPanicNil(t *testing.T) {
 	}
 
 	app.ExpectErrors(t, []internal.WantError{})
-	app.ExpectErrorEvents(t, []internal.WantErrorEvent{})
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"OtherTransaction/Go/myName", "", true, nil},
-		{"OtherTransaction/all", "", true, nil},
-	})
+	app.ExpectErrorEvents(t, []internal.WantEvent{})
+	app.ExpectMetrics(t, backgroundMetrics)
 }
 
 func TestResponseCodeError(t *testing.T) {
@@ -676,21 +514,14 @@ func TestResponseCodeError(t *testing.T) {
 		Caller:  "go-agent.(*txn).WriteHeader",
 		URL:     "/hello",
 	}})
-	app.ExpectErrorEvents(t, []internal.WantErrorEvent{{
-		TxnName: "WebTransaction/Go/hello",
-		Msg:     "Bad Request",
-		Klass:   "400",
+	app.ExpectErrorEvents(t, []internal.WantEvent{{
+		Intrinsics: map[string]interface{}{
+			"error.class":     "400",
+			"error.message":   "Bad Request",
+			"transactionName": "WebTransaction/Go/hello",
+		},
 	}})
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"WebTransaction/Go/hello", "", true, nil},
-		{"WebTransaction", "", true, nil},
-		{"HttpDispatcher", "", true, nil},
-		{"Apdex", "", true, nil},
-		{"Apdex/Go/hello", "", false, nil},
-		{"Errors/all", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/allWeb", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/WebTransaction/Go/hello", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-	})
+	app.ExpectMetrics(t, webErrorMetrics)
 }
 
 func TestResponseCode404Filtered(t *testing.T) {
@@ -707,14 +538,8 @@ func TestResponseCode404Filtered(t *testing.T) {
 	}
 
 	app.ExpectErrors(t, []internal.WantError{})
-	app.ExpectErrorEvents(t, []internal.WantErrorEvent{})
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"WebTransaction/Go/hello", "", true, nil},
-		{"WebTransaction", "", true, nil},
-		{"HttpDispatcher", "", true, nil},
-		{"Apdex", "", true, nil},
-		{"Apdex/Go/hello", "", false, nil},
-	})
+	app.ExpectErrorEvents(t, []internal.WantEvent{})
+	app.ExpectMetrics(t, webMetrics)
 }
 
 func TestResponseCodeCustomFilter(t *testing.T) {
@@ -732,14 +557,8 @@ func TestResponseCodeCustomFilter(t *testing.T) {
 	txn.End()
 
 	app.ExpectErrors(t, []internal.WantError{})
-	app.ExpectErrorEvents(t, []internal.WantErrorEvent{})
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"WebTransaction/Go/hello", "", true, nil},
-		{"WebTransaction", "", true, nil},
-		{"HttpDispatcher", "", true, nil},
-		{"Apdex", "", true, nil},
-		{"Apdex/Go/hello", "", false, nil},
-	})
+	app.ExpectErrorEvents(t, []internal.WantEvent{})
+	app.ExpectMetrics(t, webMetrics)
 }
 
 func TestResponseCodeAfterEnd(t *testing.T) {
@@ -755,14 +574,8 @@ func TestResponseCodeAfterEnd(t *testing.T) {
 	}
 
 	app.ExpectErrors(t, []internal.WantError{})
-	app.ExpectErrorEvents(t, []internal.WantErrorEvent{})
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"WebTransaction/Go/hello", "", true, nil},
-		{"WebTransaction", "", true, nil},
-		{"HttpDispatcher", "", true, nil},
-		{"Apdex", "", true, nil},
-		{"Apdex/Go/hello", "", false, nil},
-	})
+	app.ExpectErrorEvents(t, []internal.WantEvent{})
+	app.ExpectMetrics(t, webMetrics)
 }
 
 func TestResponseCodeAfterWrite(t *testing.T) {
@@ -784,14 +597,8 @@ func TestResponseCodeAfterWrite(t *testing.T) {
 	}
 
 	app.ExpectErrors(t, []internal.WantError{})
-	app.ExpectErrorEvents(t, []internal.WantErrorEvent{})
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"WebTransaction/Go/hello", "", true, nil},
-		{"WebTransaction", "", true, nil},
-		{"HttpDispatcher", "", true, nil},
-		{"Apdex", "", true, nil},
-		{"Apdex/Go/hello", "", false, nil},
-	})
+	app.ExpectErrorEvents(t, []internal.WantEvent{})
+	app.ExpectMetrics(t, webMetrics)
 }
 
 func TestQueueTime(t *testing.T) {
@@ -801,45 +608,41 @@ func TestQueueTime(t *testing.T) {
 	if nil != err {
 		t.Fatal(err)
 	}
-	txn := app.StartTransaction("myName", nil, req)
+	txn := app.StartTransaction("hello", nil, req)
 	txn.NoticeError(myError{})
 	txn.End()
 
 	app.ExpectErrors(t, []internal.WantError{{
-		TxnName: "WebTransaction/Go/myName",
+		TxnName: "WebTransaction/Go/hello",
 		Msg:     "my msg",
 		Klass:   "newrelic.myError",
 		Caller:  "go-agent.TestQueueTime",
 		URL:     "/hello",
 	}})
-	app.ExpectErrorEvents(t, []internal.WantErrorEvent{{
-		TxnName: "WebTransaction/Go/myName",
-		Msg:     "my msg",
-		Klass:   "newrelic.myError",
-		Queuing: true,
+	app.ExpectErrorEvents(t, []internal.WantEvent{{
+		Intrinsics: map[string]interface{}{
+			"error.class":     "newrelic.myError",
+			"error.message":   "my msg",
+			"transactionName": "WebTransaction/Go/hello",
+			"queueDuration":   internal.MatchAnything,
+		},
 	}})
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"WebTransaction/Go/myName", "", true, nil},
-		{"WebTransaction", "", true, nil},
-		{"HttpDispatcher", "", true, nil},
-		{"WebFrontend/QueueTime", "", true, nil},
-		{"Apdex", "", true, nil},
-		{"Apdex/Go/myName", "", false, nil},
-		{"Errors/all", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/allWeb", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/WebTransaction/Go/myName", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-	})
-	app.ExpectTxnEvents(t, []internal.WantTxnEvent{{
-		Name:            "WebTransaction/Go/myName",
-		Zone:            "F",
+	app.ExpectMetrics(t, append([]internal.WantMetric{
+		{Name: "WebFrontend/QueueTime", Scope: "", Forced: true, Data: nil},
+	}, webErrorMetrics...))
+	app.ExpectTxnEvents(t, []internal.WantEvent{{
+		Intrinsics: map[string]interface{}{
+			"name":             "WebTransaction/Go/hello",
+			"nr.apdexPerfZone": "F",
+			"queueDuration":    internal.MatchAnything,
+		},
 		AgentAttributes: nil,
-		Queuing:         true,
 	}})
 }
 
 func TestIgnore(t *testing.T) {
 	app := testApp(nil, nil, t)
-	txn := app.StartTransaction("myName", nil, nil)
+	txn := app.StartTransaction("hello", nil, nil)
 	txn.NoticeError(myError{})
 	err := txn.Ignore()
 	if nil != err {
@@ -847,14 +650,14 @@ func TestIgnore(t *testing.T) {
 	}
 	txn.End()
 	app.ExpectErrors(t, []internal.WantError{})
-	app.ExpectErrorEvents(t, []internal.WantErrorEvent{})
+	app.ExpectErrorEvents(t, []internal.WantEvent{})
 	app.ExpectMetrics(t, []internal.WantMetric{})
-	app.ExpectTxnEvents(t, []internal.WantTxnEvent{})
+	app.ExpectTxnEvents(t, []internal.WantEvent{})
 }
 
 func TestIgnoreAlreadyEnded(t *testing.T) {
 	app := testApp(nil, nil, t)
-	txn := app.StartTransaction("myName", nil, nil)
+	txn := app.StartTransaction("hello", nil, nil)
 	txn.NoticeError(myError{})
 	txn.End()
 	err := txn.Ignore()
@@ -862,27 +665,24 @@ func TestIgnoreAlreadyEnded(t *testing.T) {
 		t.Error(err)
 	}
 	app.ExpectErrors(t, []internal.WantError{{
-		TxnName: "OtherTransaction/Go/myName",
+		TxnName: "OtherTransaction/Go/hello",
 		Msg:     "my msg",
 		Klass:   "newrelic.myError",
 		Caller:  "go-agent.TestIgnoreAlreadyEnded",
 		URL:     "",
 	}})
-	app.ExpectErrorEvents(t, []internal.WantErrorEvent{{
-		TxnName: "OtherTransaction/Go/myName",
-		Msg:     "my msg",
-		Klass:   "newrelic.myError",
+	app.ExpectErrorEvents(t, []internal.WantEvent{{
+		Intrinsics: map[string]interface{}{
+			"error.class":     "newrelic.myError",
+			"error.message":   "my msg",
+			"transactionName": "OtherTransaction/Go/hello",
+		},
 	}})
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"OtherTransaction/Go/myName", "", true, nil},
-		{"OtherTransaction/all", "", true, nil},
-		{"Errors/all", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/allOther", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/OtherTransaction/Go/myName", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-	})
-	app.ExpectTxnEvents(t, []internal.WantTxnEvent{{
-		Name: "OtherTransaction/Go/myName",
-		Zone: "",
+	app.ExpectMetrics(t, backgroundErrorMetrics)
+	app.ExpectTxnEvents(t, []internal.WantEvent{{
+		Intrinsics: map[string]interface{}{
+			"name": "OtherTransaction/Go/hello",
+		},
 	}})
 }
 
@@ -916,41 +716,47 @@ func TestExternalSegmentURL(t *testing.T) {
 	response := &http.Response{Request: responsereq}
 
 	// empty segment
-	host := internal.HostFromURL(externalSegmentURL(ExternalSegment{}))
-	if "" != host {
-		t.Error(host)
+	u, err := externalSegmentURL(ExternalSegment{})
+	host := internal.HostFromURL(u)
+	if nil != err || nil != u || "" != host {
+		t.Error(u, err, internal.HostFromURL(u))
 	}
 	// segment only containing url
-	host = internal.HostFromURL(externalSegmentURL(ExternalSegment{URL: rawURL}))
-	if "url.com" != host {
-		t.Error(host)
+	u, err = externalSegmentURL(ExternalSegment{URL: rawURL})
+	host = internal.HostFromURL(u)
+	if nil != err || host != "url.com" {
+		t.Error(u, err, internal.HostFromURL(u))
 	}
 	// segment only containing request
-	host = internal.HostFromURL(externalSegmentURL(ExternalSegment{Request: req}))
-	if "request.com" != host {
+	u, err = externalSegmentURL(ExternalSegment{Request: req})
+	host = internal.HostFromURL(u)
+	if nil != err || "request.com" != host {
 		t.Error(host)
 	}
 	// segment only containing response
-	host = internal.HostFromURL(externalSegmentURL(ExternalSegment{Response: response}))
-	if "response.com" != host {
+	u, err = externalSegmentURL(ExternalSegment{Response: response})
+	host = internal.HostFromURL(u)
+	if nil != err || "response.com" != host {
 		t.Error(host)
 	}
 	// segment containing request and response
-	host = internal.HostFromURL(externalSegmentURL(ExternalSegment{
+	u, err = externalSegmentURL(ExternalSegment{
 		Request:  req,
 		Response: response,
-	}))
-	if "response.com" != host {
+	})
+	host = internal.HostFromURL(u)
+	if nil != err || "response.com" != host {
 		t.Error(host)
 	}
 	// segment containing url, request, and response
-	host = internal.HostFromURL(externalSegmentURL(ExternalSegment{
+	u, err = externalSegmentURL(ExternalSegment{
 		URL:      rawURL,
 		Request:  req,
 		Response: response,
-	}))
-	if "url.com" != host {
-		t.Error(host)
+	})
+	host = internal.HostFromURL(u)
+	if nil != err || "url.com" != host {
+		t.Error(err, host)
 	}
 }
 
@@ -971,59 +777,84 @@ func TestZeroSegmentsSafe(t *testing.T) {
 	StartExternalSegment(nil, nil).End()
 }
 
-func TestTraceSegment(t *testing.T) {
+func TestTraceSegmentDefer(t *testing.T) {
 	app := testApp(nil, nil, t)
-	txn := app.StartTransaction("myName", nil, helloRequest)
+	txn := app.StartTransaction("hello", nil, helloRequest)
 	func() {
 		defer StartSegment(txn, "segment").End()
 	}()
 	txn.End()
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"WebTransaction/Go/myName", "", true, nil},
-		{"WebTransaction", "", true, nil},
-		{"HttpDispatcher", "", true, nil},
-		{"Apdex", "", true, nil},
-		{"Apdex/Go/myName", "", false, nil},
-		{"Custom/segment", "", false, nil},
-		{"Custom/segment", "WebTransaction/Go/myName", false, nil},
-	})
+	scope := "WebTransaction/Go/hello"
+	app.ExpectMetrics(t, append([]internal.WantMetric{
+		{Name: "Custom/segment", Scope: "", Forced: false, Data: nil},
+		{Name: "Custom/segment", Scope: scope, Forced: false, Data: nil},
+	}, webMetrics...))
+}
+
+func TestTraceSegmentNilErr(t *testing.T) {
+	app := testApp(nil, nil, t)
+	txn := app.StartTransaction("hello", nil, helloRequest)
+	err := StartSegment(txn, "segment").End()
+	if nil != err {
+		t.Error(err)
+	}
+	txn.End()
+	scope := "WebTransaction/Go/hello"
+	app.ExpectMetrics(t, append([]internal.WantMetric{
+		{Name: "Custom/segment", Scope: "", Forced: false, Data: nil},
+		{Name: "Custom/segment", Scope: scope, Forced: false, Data: nil},
+	}, webMetrics...))
+}
+
+func TestTraceSegmentOutOfOrder(t *testing.T) {
+	app := testApp(nil, nil, t)
+	txn := app.StartTransaction("hello", nil, helloRequest)
+	s1 := StartSegment(txn, "s1")
+	s2 := StartSegment(txn, "s1")
+	err1 := s1.End()
+	err2 := s2.End()
+	if nil != err1 {
+		t.Error(err1)
+	}
+	if nil == err2 {
+		t.Error(err2)
+	}
+	txn.End()
+	scope := "WebTransaction/Go/hello"
+	app.ExpectMetrics(t, append([]internal.WantMetric{
+		{Name: "Custom/s1", Scope: "", Forced: false, Data: nil},
+		{Name: "Custom/s1", Scope: scope, Forced: false, Data: nil},
+	}, webMetrics...))
 }
 
 func TestTraceSegmentEndedBeforeStartSegment(t *testing.T) {
 	app := testApp(nil, nil, t)
-	txn := app.StartTransaction("myName", nil, helloRequest)
+	txn := app.StartTransaction("hello", nil, helloRequest)
 	txn.End()
-	func() {
-		defer StartSegment(txn, "segment").End()
-	}()
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"WebTransaction/Go/myName", "", true, nil},
-		{"WebTransaction", "", true, nil},
-		{"HttpDispatcher", "", true, nil},
-		{"Apdex", "", true, nil},
-		{"Apdex/Go/myName", "", false, nil},
-	})
+	s := StartSegment(txn, "segment")
+	err := s.End()
+	if err != errAlreadyEnded {
+		t.Error(err)
+	}
+	app.ExpectMetrics(t, webMetrics)
 }
 
 func TestTraceSegmentEndedBeforeEndSegment(t *testing.T) {
 	app := testApp(nil, nil, t)
-	txn := app.StartTransaction("myName", nil, helloRequest)
+	txn := app.StartTransaction("hello", nil, helloRequest)
 	s := StartSegment(txn, "segment")
 	txn.End()
-	s.End()
+	err := s.End()
+	if err != errAlreadyEnded {
+		t.Error(err)
+	}
 
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"WebTransaction/Go/myName", "", true, nil},
-		{"WebTransaction", "", true, nil},
-		{"HttpDispatcher", "", true, nil},
-		{"Apdex", "", true, nil},
-		{"Apdex/Go/myName", "", false, nil},
-	})
+	app.ExpectMetrics(t, webMetrics)
 }
 
 func TestTraceSegmentPanic(t *testing.T) {
 	app := testApp(nil, nil, t)
-	txn := app.StartTransaction("myName", nil, helloRequest)
+	txn := app.StartTransaction("hello", nil, helloRequest)
 	func() {
 		defer func() {
 			recover()
@@ -1051,193 +882,185 @@ func TestTraceSegmentPanic(t *testing.T) {
 	}()
 
 	txn.End()
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"WebTransaction/Go/myName", "", true, nil},
-		{"WebTransaction", "", true, nil},
-		{"HttpDispatcher", "", true, nil},
-		{"Apdex", "", true, nil},
-		{"Apdex/Go/myName", "", false, nil},
-		{"Custom/f1", "", false, nil},
-		{"Custom/f1", "WebTransaction/Go/myName", false, nil},
-		{"Custom/f3", "", false, nil},
-		{"Custom/f3", "WebTransaction/Go/myName", false, nil},
-	})
+	scope := "WebTransaction/Go/hello"
+	app.ExpectMetrics(t, append([]internal.WantMetric{
+		{Name: "Custom/f1", Scope: "", Forced: false, Data: nil},
+		{Name: "Custom/f1", Scope: scope, Forced: false, Data: nil},
+		{Name: "Custom/f3", Scope: "", Forced: false, Data: nil},
+		{Name: "Custom/f3", Scope: scope, Forced: false, Data: nil},
+	}, webMetrics...))
 }
 
 func TestTraceSegmentNilTxn(t *testing.T) {
 	app := testApp(nil, nil, t)
-	txn := app.StartTransaction("myName", nil, helloRequest)
+	txn := app.StartTransaction("hello", nil, helloRequest)
 	s := Segment{Name: "hello"}
-	s.End()
+	err := s.End()
+	if err != nil {
+		t.Error(err)
+	}
 	txn.End()
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"WebTransaction/Go/myName", "", true, nil},
-		{"WebTransaction", "", true, nil},
-		{"HttpDispatcher", "", true, nil},
-		{"Apdex", "", true, nil},
-		{"Apdex/Go/myName", "", false, nil},
-	})
+	app.ExpectMetrics(t, webMetrics)
 }
 
 func TestTraceDatastore(t *testing.T) {
 	app := testApp(nil, nil, t)
-	txn := app.StartTransaction("myName", nil, helloRequest)
-	func() {
-		s := DatastoreSegment{}
-		s.StartTime = txn.StartSegmentNow()
-		s.Product = DatastoreMySQL
-		s.Collection = "my_table"
-		s.Operation = "SELECT"
-		defer s.End()
-	}()
+	txn := app.StartTransaction("hello", nil, helloRequest)
+	s := DatastoreSegment{}
+	s.StartTime = txn.StartSegmentNow()
+	s.Product = DatastoreMySQL
+	s.Collection = "my_table"
+	s.Operation = "SELECT"
+	err := s.End()
+	if nil != err {
+		t.Error(err)
+	}
 	txn.NoticeError(myError{})
 	txn.End()
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"WebTransaction/Go/myName", "", true, nil},
-		{"WebTransaction", "", true, nil},
-		{"HttpDispatcher", "", true, nil},
-		{"Apdex", "", true, nil},
-		{"Apdex/Go/myName", "", false, nil},
-		{"Errors/all", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/allWeb", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/WebTransaction/Go/myName", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Datastore/all", "", true, nil},
-		{"Datastore/allWeb", "", true, nil},
-		{"Datastore/MySQL/all", "", true, nil},
-		{"Datastore/MySQL/allWeb", "", true, nil},
-		{"Datastore/operation/MySQL/SELECT", "", false, nil},
-		{"Datastore/statement/MySQL/my_table/SELECT", "", false, nil},
-		{"Datastore/statement/MySQL/my_table/SELECT", "WebTransaction/Go/myName", false, nil},
-		{"Datastore/instance/MySQL/unknown/unknown", "", false, nil},
-	})
-	app.ExpectErrorEvents(t, []internal.WantErrorEvent{{
-		TxnName:            "WebTransaction/Go/myName",
-		Msg:                "my msg",
-		Klass:              "newrelic.myError",
-		DatastoreCallCount: 1,
+	scope := "WebTransaction/Go/hello"
+	app.ExpectMetrics(t, append([]internal.WantMetric{
+		{Name: "Datastore/all", Scope: "", Forced: true, Data: nil},
+		{Name: "Datastore/allWeb", Scope: "", Forced: true, Data: nil},
+		{Name: "Datastore/MySQL/all", Scope: "", Forced: true, Data: nil},
+		{Name: "Datastore/MySQL/allWeb", Scope: "", Forced: true, Data: nil},
+		{Name: "Datastore/operation/MySQL/SELECT", Scope: "", Forced: false, Data: nil},
+		{Name: "Datastore/statement/MySQL/my_table/SELECT", Scope: "", Forced: false, Data: nil},
+		{Name: "Datastore/statement/MySQL/my_table/SELECT", Scope: scope, Forced: false, Data: nil},
+	}, webErrorMetrics...))
+	app.ExpectErrorEvents(t, []internal.WantEvent{{
+		Intrinsics: map[string]interface{}{
+			"error.class":       "newrelic.myError",
+			"error.message":     "my msg",
+			"transactionName":   "WebTransaction/Go/hello",
+			"databaseCallCount": 1,
+			"databaseDuration":  internal.MatchAnything,
+		},
 	}})
-	app.ExpectTxnEvents(t, []internal.WantTxnEvent{{
-		Name:               "WebTransaction/Go/myName",
-		Zone:               "F",
-		DatastoreCallCount: 1,
+	app.ExpectTxnEvents(t, []internal.WantEvent{{
+		Intrinsics: map[string]interface{}{
+			"name":              "WebTransaction/Go/hello",
+			"nr.apdexPerfZone":  "F",
+			"databaseCallCount": 1,
+			"databaseDuration":  internal.MatchAnything,
+		},
 	}})
 }
 
 func TestTraceDatastoreBackground(t *testing.T) {
 	app := testApp(nil, nil, t)
-	txn := app.StartTransaction("myName", nil, nil)
-	func() {
-		defer DatastoreSegment{
-			StartTime:  txn.StartSegmentNow(),
-			Product:    DatastoreMySQL,
-			Collection: "my_table",
-			Operation:  "SELECT",
-		}.End()
-	}()
+	txn := app.StartTransaction("hello", nil, nil)
+	s := DatastoreSegment{
+		StartTime:  txn.StartSegmentNow(),
+		Product:    DatastoreMySQL,
+		Collection: "my_table",
+		Operation:  "SELECT",
+	}
+	err := s.End()
+	if nil != err {
+		t.Error(err)
+	}
 	txn.NoticeError(myError{})
 	txn.End()
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"OtherTransaction/Go/myName", "", true, nil},
-		{"OtherTransaction/all", "", true, nil},
-		{"Errors/all", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/allOther", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/OtherTransaction/Go/myName", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Datastore/all", "", true, nil},
-		{"Datastore/allOther", "", true, nil},
-		{"Datastore/MySQL/all", "", true, nil},
-		{"Datastore/MySQL/allOther", "", true, nil},
-		{"Datastore/operation/MySQL/SELECT", "", false, nil},
-		{"Datastore/statement/MySQL/my_table/SELECT", "", false, nil},
-		{"Datastore/statement/MySQL/my_table/SELECT", "OtherTransaction/Go/myName", false, nil},
-		{"Datastore/instance/MySQL/unknown/unknown", "", false, nil},
-	})
-	app.ExpectErrorEvents(t, []internal.WantErrorEvent{{
-		TxnName:            "OtherTransaction/Go/myName",
-		Msg:                "my msg",
-		Klass:              "newrelic.myError",
-		DatastoreCallCount: 1,
+	scope := "OtherTransaction/Go/hello"
+	app.ExpectMetrics(t, append([]internal.WantMetric{
+		{Name: "Datastore/all", Scope: "", Forced: true, Data: nil},
+		{Name: "Datastore/allOther", Scope: "", Forced: true, Data: nil},
+		{Name: "Datastore/MySQL/all", Scope: "", Forced: true, Data: nil},
+		{Name: "Datastore/MySQL/allOther", Scope: "", Forced: true, Data: nil},
+		{Name: "Datastore/operation/MySQL/SELECT", Scope: "", Forced: false, Data: nil},
+		{Name: "Datastore/statement/MySQL/my_table/SELECT", Scope: "", Forced: false, Data: nil},
+		{Name: "Datastore/statement/MySQL/my_table/SELECT", Scope: scope, Forced: false, Data: nil},
+	}, backgroundErrorMetrics...))
+	app.ExpectErrorEvents(t, []internal.WantEvent{{
+		Intrinsics: map[string]interface{}{
+			"error.class":       "newrelic.myError",
+			"error.message":     "my msg",
+			"transactionName":   "OtherTransaction/Go/hello",
+			"databaseCallCount": 1,
+			"databaseDuration":  internal.MatchAnything,
+		},
 	}})
-	app.ExpectTxnEvents(t, []internal.WantTxnEvent{{
-		Name:               "OtherTransaction/Go/myName",
-		Zone:               "",
-		DatastoreCallCount: 1,
+	app.ExpectTxnEvents(t, []internal.WantEvent{{
+		Intrinsics: map[string]interface{}{
+			"name":              "OtherTransaction/Go/hello",
+			"databaseCallCount": 1,
+			"databaseDuration":  internal.MatchAnything,
+		},
 	}})
 }
 
 func TestTraceDatastoreMissingProductOperationCollection(t *testing.T) {
 	app := testApp(nil, nil, t)
-	txn := app.StartTransaction("myName", nil, helloRequest)
-	func() {
-		defer DatastoreSegment{
-			StartTime: txn.StartSegmentNow(),
-		}.End()
-	}()
+	txn := app.StartTransaction("hello", nil, helloRequest)
+	s := DatastoreSegment{
+		StartTime: txn.StartSegmentNow(),
+	}
+	err := s.End()
+	if nil != err {
+		t.Error(err)
+	}
 	txn.NoticeError(myError{})
 	txn.End()
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"WebTransaction/Go/myName", "", true, nil},
-		{"WebTransaction", "", true, nil},
-		{"HttpDispatcher", "", true, nil},
-		{"Apdex", "", true, nil},
-		{"Apdex/Go/myName", "", false, nil},
-		{"Errors/all", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/allWeb", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/WebTransaction/Go/myName", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Datastore/all", "", true, nil},
-		{"Datastore/allWeb", "", true, nil},
-		{"Datastore/Unknown/all", "", true, nil},
-		{"Datastore/Unknown/allWeb", "", true, nil},
-		{"Datastore/operation/Unknown/other", "", false, nil},
-		{"Datastore/operation/Unknown/other", "WebTransaction/Go/myName", false, nil},
-		{"Datastore/instance/Unknown/unknown/unknown", "", false, nil},
-	})
-	app.ExpectErrorEvents(t, []internal.WantErrorEvent{{
-		TxnName:            "WebTransaction/Go/myName",
-		Msg:                "my msg",
-		Klass:              "newrelic.myError",
-		DatastoreCallCount: 1,
+	scope := "WebTransaction/Go/hello"
+	app.ExpectMetrics(t, append([]internal.WantMetric{
+		{Name: "Datastore/all", Scope: "", Forced: true, Data: nil},
+		{Name: "Datastore/allWeb", Scope: "", Forced: true, Data: nil},
+		{Name: "Datastore/Unknown/all", Scope: "", Forced: true, Data: nil},
+		{Name: "Datastore/Unknown/allWeb", Scope: "", Forced: true, Data: nil},
+		{Name: "Datastore/operation/Unknown/other", Scope: "", Forced: false, Data: nil},
+		{Name: "Datastore/operation/Unknown/other", Scope: scope, Forced: false, Data: nil},
+	}, webErrorMetrics...))
+	app.ExpectErrorEvents(t, []internal.WantEvent{{
+		Intrinsics: map[string]interface{}{
+			"error.class":       "newrelic.myError",
+			"error.message":     "my msg",
+			"transactionName":   "WebTransaction/Go/hello",
+			"databaseCallCount": 1,
+			"databaseDuration":  internal.MatchAnything,
+		},
 	}})
-	app.ExpectTxnEvents(t, []internal.WantTxnEvent{{
-		Name:               "WebTransaction/Go/myName",
-		Zone:               "F",
-		DatastoreCallCount: 1,
+	app.ExpectTxnEvents(t, []internal.WantEvent{{
+		Intrinsics: map[string]interface{}{
+			"name":              "WebTransaction/Go/hello",
+			"nr.apdexPerfZone":  "F",
+			"databaseCallCount": 1,
+			"databaseDuration":  internal.MatchAnything,
+		},
 	}})
 }
 
 func TestTraceDatastoreNilTxn(t *testing.T) {
 	app := testApp(nil, nil, t)
-	txn := app.StartTransaction("myName", nil, helloRequest)
+	txn := app.StartTransaction("hello", nil, helloRequest)
 	var s DatastoreSegment
 	s.Product = DatastoreMySQL
 	s.Collection = "my_table"
 	s.Operation = "SELECT"
-	s.End()
+	err := s.End()
+	if nil != err {
+		t.Error(err)
+	}
 	txn.NoticeError(myError{})
 	txn.End()
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"WebTransaction/Go/myName", "", true, nil},
-		{"WebTransaction", "", true, nil},
-		{"HttpDispatcher", "", true, nil},
-		{"Apdex", "", true, nil},
-		{"Apdex/Go/myName", "", false, nil},
-		{"Errors/all", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/allWeb", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/WebTransaction/Go/myName", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-	})
-	app.ExpectErrorEvents(t, []internal.WantErrorEvent{{
-		TxnName: "WebTransaction/Go/myName",
-		Msg:     "my msg",
-		Klass:   "newrelic.myError",
+	app.ExpectMetrics(t, webErrorMetrics)
+	app.ExpectErrorEvents(t, []internal.WantEvent{{
+		Intrinsics: map[string]interface{}{
+			"error.class":     "newrelic.myError",
+			"error.message":   "my msg",
+			"transactionName": "WebTransaction/Go/hello",
+		},
 	}})
-	app.ExpectTxnEvents(t, []internal.WantTxnEvent{{
-		Name: "WebTransaction/Go/myName",
-		Zone: "F",
+	app.ExpectTxnEvents(t, []internal.WantEvent{{
+		Intrinsics: map[string]interface{}{
+			"name":             "WebTransaction/Go/hello",
+			"nr.apdexPerfZone": "F",
+		},
 	}})
 }
 
 func TestTraceDatastoreTxnEnded(t *testing.T) {
 	app := testApp(nil, nil, t)
-	txn := app.StartTransaction("myName", nil, helloRequest)
+	txn := app.StartTransaction("hello", nil, helloRequest)
 	txn.NoticeError(myError{})
 	s := DatastoreSegment{
 		StartTime:  txn.StartSegmentNow(),
@@ -1246,202 +1069,228 @@ func TestTraceDatastoreTxnEnded(t *testing.T) {
 		Operation:  "SELECT",
 	}
 	txn.End()
-	s.End()
-
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"WebTransaction/Go/myName", "", true, nil},
-		{"WebTransaction", "", true, nil},
-		{"HttpDispatcher", "", true, nil},
-		{"Apdex", "", true, nil},
-		{"Apdex/Go/myName", "", false, nil},
-		{"Errors/all", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/allWeb", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/WebTransaction/Go/myName", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-	})
-	app.ExpectErrorEvents(t, []internal.WantErrorEvent{{
-		TxnName: "WebTransaction/Go/myName",
-		Msg:     "my msg",
-		Klass:   "newrelic.myError",
+	err := s.End()
+	if errAlreadyEnded != err {
+		t.Error(err)
+	}
+	app.ExpectMetrics(t, webErrorMetrics)
+	app.ExpectErrorEvents(t, []internal.WantEvent{{
+		Intrinsics: map[string]interface{}{
+			"error.class":     "newrelic.myError",
+			"error.message":   "my msg",
+			"transactionName": "WebTransaction/Go/hello",
+		},
 	}})
-	app.ExpectTxnEvents(t, []internal.WantTxnEvent{{
-		Name: "WebTransaction/Go/myName",
-		Zone: "F",
+	app.ExpectTxnEvents(t, []internal.WantEvent{{
+		Intrinsics: map[string]interface{}{
+			"name":             "WebTransaction/Go/hello",
+			"nr.apdexPerfZone": "F",
+		},
 	}})
 }
 
 func TestTraceExternal(t *testing.T) {
 	app := testApp(nil, nil, t)
-	txn := app.StartTransaction("myName", nil, helloRequest)
-	func() {
-		defer ExternalSegment{
-			StartTime: txn.StartSegmentNow(),
-			URL:       "http://example.com/",
-		}.End()
-	}()
+	txn := app.StartTransaction("hello", nil, helloRequest)
+	s := ExternalSegment{
+		StartTime: txn.StartSegmentNow(),
+		URL:       "http://example.com/",
+	}
+	err := s.End()
+	if nil != err {
+		t.Error(err)
+	}
 	txn.NoticeError(myError{})
 	txn.End()
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"WebTransaction/Go/myName", "", true, nil},
-		{"WebTransaction", "", true, nil},
-		{"HttpDispatcher", "", true, nil},
-		{"Apdex", "", true, nil},
-		{"Apdex/Go/myName", "", false, nil},
-		{"Errors/all", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/allWeb", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/WebTransaction/Go/myName", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"External/all", "", true, nil},
-		{"External/allWeb", "", true, nil},
-		{"External/example.com/all", "", false, nil},
-		{"External/example.com/all", "WebTransaction/Go/myName", false, nil},
-	})
-	app.ExpectErrorEvents(t, []internal.WantErrorEvent{{
-		TxnName:           "WebTransaction/Go/myName",
-		Msg:               "my msg",
-		Klass:             "newrelic.myError",
-		ExternalCallCount: 1,
+	scope := "WebTransaction/Go/hello"
+	app.ExpectMetrics(t, append([]internal.WantMetric{
+		{Name: "External/all", Scope: "", Forced: true, Data: nil},
+		{Name: "External/allWeb", Scope: "", Forced: true, Data: nil},
+		{Name: "External/example.com/all", Scope: "", Forced: false, Data: nil},
+		{Name: "External/example.com/all", Scope: scope, Forced: false, Data: nil},
+	}, webErrorMetrics...))
+	app.ExpectErrorEvents(t, []internal.WantEvent{{
+		Intrinsics: map[string]interface{}{
+			"error.class":       "newrelic.myError",
+			"error.message":     "my msg",
+			"transactionName":   "WebTransaction/Go/hello",
+			"externalCallCount": 1,
+			"externalDuration":  internal.MatchAnything,
+		},
 	}})
-	app.ExpectTxnEvents(t, []internal.WantTxnEvent{{
-		Name:              "WebTransaction/Go/myName",
-		Zone:              "F",
-		ExternalCallCount: 1,
+	app.ExpectTxnEvents(t, []internal.WantEvent{{
+		Intrinsics: map[string]interface{}{
+			"name":              "WebTransaction/Go/hello",
+			"nr.apdexPerfZone":  "F",
+			"externalCallCount": 1,
+			"externalDuration":  internal.MatchAnything,
+		},
+	}})
+}
+
+func TestTraceExternalBadURL(t *testing.T) {
+	app := testApp(nil, nil, t)
+	txn := app.StartTransaction("hello", nil, helloRequest)
+	s := ExternalSegment{
+		StartTime: txn.StartSegmentNow(),
+		URL:       ":example.com/",
+	}
+	err := s.End()
+	if nil == err {
+		t.Error(err)
+	}
+	txn.NoticeError(myError{})
+	txn.End()
+	app.ExpectMetrics(t, webErrorMetrics)
+	app.ExpectErrorEvents(t, []internal.WantEvent{{
+		Intrinsics: map[string]interface{}{
+			"error.class":     "newrelic.myError",
+			"error.message":   "my msg",
+			"transactionName": "WebTransaction/Go/hello",
+		},
+	}})
+	app.ExpectTxnEvents(t, []internal.WantEvent{{
+		Intrinsics: map[string]interface{}{
+			"name":             "WebTransaction/Go/hello",
+			"nr.apdexPerfZone": "F",
+		},
 	}})
 }
 
 func TestTraceExternalBackground(t *testing.T) {
 	app := testApp(nil, nil, t)
-	txn := app.StartTransaction("myName", nil, nil)
-	func() {
-		defer ExternalSegment{
-			StartTime: txn.StartSegmentNow(),
-			URL:       "http://example.com/",
-		}.End()
-	}()
+	txn := app.StartTransaction("hello", nil, nil)
+	s := ExternalSegment{
+		StartTime: txn.StartSegmentNow(),
+		URL:       "http://example.com/",
+	}
+	err := s.End()
+	if nil != err {
+		t.Error(err)
+	}
 	txn.NoticeError(myError{})
 	txn.End()
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"OtherTransaction/Go/myName", "", true, nil},
-		{"OtherTransaction/all", "", true, nil},
-		{"Errors/all", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/allOther", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/OtherTransaction/Go/myName", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"External/all", "", true, nil},
-		{"External/allOther", "", true, nil},
-		{"External/example.com/all", "", false, nil},
-		{"External/example.com/all", "OtherTransaction/Go/myName", false, nil},
-	})
-	app.ExpectErrorEvents(t, []internal.WantErrorEvent{{
-		TxnName:           "OtherTransaction/Go/myName",
-		Msg:               "my msg",
-		Klass:             "newrelic.myError",
-		ExternalCallCount: 1,
+	scope := "OtherTransaction/Go/hello"
+	app.ExpectMetrics(t, append([]internal.WantMetric{
+		{Name: "External/all", Scope: "", Forced: true, Data: nil},
+		{Name: "External/allOther", Scope: "", Forced: true, Data: nil},
+		{Name: "External/example.com/all", Scope: "", Forced: false, Data: nil},
+		{Name: "External/example.com/all", Scope: scope, Forced: false, Data: nil},
+	}, backgroundErrorMetrics...))
+	app.ExpectErrorEvents(t, []internal.WantEvent{{
+		Intrinsics: map[string]interface{}{
+			"error.class":       "newrelic.myError",
+			"error.message":     "my msg",
+			"transactionName":   "OtherTransaction/Go/hello",
+			"externalCallCount": 1,
+			"externalDuration":  internal.MatchAnything,
+		},
 	}})
-	app.ExpectTxnEvents(t, []internal.WantTxnEvent{{
-		Name:              "OtherTransaction/Go/myName",
-		Zone:              "",
-		ExternalCallCount: 1,
+	app.ExpectTxnEvents(t, []internal.WantEvent{{
+		Intrinsics: map[string]interface{}{
+			"name":              "OtherTransaction/Go/hello",
+			"externalCallCount": 1,
+			"externalDuration":  internal.MatchAnything,
+		},
 	}})
 }
 
 func TestTraceExternalMissingURL(t *testing.T) {
 	app := testApp(nil, nil, t)
-	txn := app.StartTransaction("myName", nil, helloRequest)
-	func() {
-		defer ExternalSegment{
-			StartTime: txn.StartSegmentNow(),
-		}.End()
-	}()
+	txn := app.StartTransaction("hello", nil, helloRequest)
+	s := ExternalSegment{
+		StartTime: txn.StartSegmentNow(),
+	}
+	err := s.End()
+	if nil != err {
+		t.Error(err)
+	}
 	txn.NoticeError(myError{})
 	txn.End()
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"WebTransaction/Go/myName", "", true, nil},
-		{"WebTransaction", "", true, nil},
-		{"HttpDispatcher", "", true, nil},
-		{"Apdex", "", true, nil},
-		{"Apdex/Go/myName", "", false, nil},
-		{"Errors/all", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/allWeb", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/WebTransaction/Go/myName", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"External/all", "", true, nil},
-		{"External/allWeb", "", true, nil},
-		{"External/unknown/all", "", false, nil},
-		{"External/unknown/all", "WebTransaction/Go/myName", false, nil},
-	})
-	app.ExpectErrorEvents(t, []internal.WantErrorEvent{{
-		TxnName:           "WebTransaction/Go/myName",
-		Msg:               "my msg",
-		Klass:             "newrelic.myError",
-		ExternalCallCount: 1,
+	scope := "WebTransaction/Go/hello"
+	app.ExpectMetrics(t, append([]internal.WantMetric{
+		{Name: "External/all", Scope: "", Forced: true, Data: nil},
+		{Name: "External/allWeb", Scope: "", Forced: true, Data: nil},
+		{Name: "External/unknown/all", Scope: "", Forced: false, Data: nil},
+		{Name: "External/unknown/all", Scope: scope, Forced: false, Data: nil},
+	}, webErrorMetrics...))
+	app.ExpectErrorEvents(t, []internal.WantEvent{{
+		Intrinsics: map[string]interface{}{
+			"error.class":       "newrelic.myError",
+			"error.message":     "my msg",
+			"transactionName":   "WebTransaction/Go/hello",
+			"externalCallCount": 1,
+			"externalDuration":  internal.MatchAnything,
+		},
 	}})
-	app.ExpectTxnEvents(t, []internal.WantTxnEvent{{
-		Name:              "WebTransaction/Go/myName",
-		Zone:              "F",
-		ExternalCallCount: 1,
+	app.ExpectTxnEvents(t, []internal.WantEvent{{
+		Intrinsics: map[string]interface{}{
+			"name":              "WebTransaction/Go/hello",
+			"nr.apdexPerfZone":  "F",
+			"externalCallCount": 1,
+			"externalDuration":  internal.MatchAnything,
+		},
 	}})
 }
 
 func TestTraceExternalNilTxn(t *testing.T) {
 	app := testApp(nil, nil, t)
-	txn := app.StartTransaction("myName", nil, helloRequest)
+	txn := app.StartTransaction("hello", nil, helloRequest)
 	txn.NoticeError(myError{})
 	var s ExternalSegment
-	s.End()
+	err := s.End()
+	if nil != err {
+		t.Error(err)
+	}
 	txn.End()
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"WebTransaction/Go/myName", "", true, nil},
-		{"WebTransaction", "", true, nil},
-		{"HttpDispatcher", "", true, nil},
-		{"Apdex", "", true, nil},
-		{"Apdex/Go/myName", "", false, nil},
-		{"Errors/all", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/allWeb", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/WebTransaction/Go/myName", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-	})
-	app.ExpectErrorEvents(t, []internal.WantErrorEvent{{
-		TxnName: "WebTransaction/Go/myName",
-		Msg:     "my msg",
-		Klass:   "newrelic.myError",
+	app.ExpectMetrics(t, webErrorMetrics)
+	app.ExpectErrorEvents(t, []internal.WantEvent{{
+		Intrinsics: map[string]interface{}{
+			"error.class":     "newrelic.myError",
+			"error.message":   "my msg",
+			"transactionName": "WebTransaction/Go/hello",
+		},
 	}})
-	app.ExpectTxnEvents(t, []internal.WantTxnEvent{{
-		Name: "WebTransaction/Go/myName",
-		Zone: "F",
+	app.ExpectTxnEvents(t, []internal.WantEvent{{
+		Intrinsics: map[string]interface{}{
+			"name":             "WebTransaction/Go/hello",
+			"nr.apdexPerfZone": "F",
+		},
 	}})
 }
 
 func TestTraceExternalTxnEnded(t *testing.T) {
 	app := testApp(nil, nil, t)
-	txn := app.StartTransaction("myName", nil, helloRequest)
+	txn := app.StartTransaction("hello", nil, helloRequest)
 	txn.NoticeError(myError{})
 	s := ExternalSegment{
 		StartTime: txn.StartSegmentNow(),
 		URL:       "http://example.com/",
 	}
 	txn.End()
-	s.End()
-
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"WebTransaction/Go/myName", "", true, nil},
-		{"WebTransaction", "", true, nil},
-		{"HttpDispatcher", "", true, nil},
-		{"Apdex", "", true, nil},
-		{"Apdex/Go/myName", "", false, nil},
-		{"Errors/all", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/allWeb", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/WebTransaction/Go/myName", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-	})
-	app.ExpectErrorEvents(t, []internal.WantErrorEvent{{
-		TxnName: "WebTransaction/Go/myName",
-		Msg:     "my msg",
-		Klass:   "newrelic.myError",
+	err := s.End()
+	if err != errAlreadyEnded {
+		t.Error(err)
+	}
+	app.ExpectMetrics(t, webErrorMetrics)
+	app.ExpectErrorEvents(t, []internal.WantEvent{{
+		Intrinsics: map[string]interface{}{
+			"error.class":     "newrelic.myError",
+			"error.message":   "my msg",
+			"transactionName": "WebTransaction/Go/hello",
+		},
 	}})
-	app.ExpectTxnEvents(t, []internal.WantTxnEvent{{
-		Name: "WebTransaction/Go/myName",
-		Zone: "F",
+	app.ExpectTxnEvents(t, []internal.WantEvent{{
+		Intrinsics: map[string]interface{}{
+			"name":             "WebTransaction/Go/hello",
+			"nr.apdexPerfZone": "F",
+		},
 	}})
 }
 
 func TestRoundTripper(t *testing.T) {
 	app := testApp(nil, nil, t)
-	txn := app.StartTransaction("myName", nil, nil)
+	txn := app.StartTransaction("hello", nil, nil)
 	url := "http://example.com/"
 	client := &http.Client{}
 	inner := roundTripperFunc(func(r *http.Request) (*http.Response, error) {
@@ -1458,40 +1307,44 @@ func TestRoundTripper(t *testing.T) {
 	}
 	txn.NoticeError(myError{})
 	txn.End()
-	app.ExpectMetrics(t, []internal.WantMetric{
-		{"OtherTransaction/Go/myName", "", true, nil},
-		{"OtherTransaction/all", "", true, nil},
-		{"Errors/all", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/allOther", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"Errors/OtherTransaction/Go/myName", "", true, []float64{1, 0, 0, 0, 0, 0, 0}},
-		{"External/all", "", true, nil},
-		{"External/allOther", "", true, nil},
-		{"External/example.com/all", "", false, nil},
-		{"External/example.com/all", "OtherTransaction/Go/myName", false, nil},
-	})
-	app.ExpectErrorEvents(t, []internal.WantErrorEvent{{
-		TxnName:           "OtherTransaction/Go/myName",
-		Msg:               "my msg",
-		Klass:             "newrelic.myError",
-		ExternalCallCount: 1,
+	scope := "OtherTransaction/Go/hello"
+	app.ExpectMetrics(t, append([]internal.WantMetric{
+		{Name: "External/all", Scope: "", Forced: true, Data: nil},
+		{Name: "External/allOther", Scope: "", Forced: true, Data: nil},
+		{Name: "External/example.com/all", Scope: "", Forced: false, Data: nil},
+		{Name: "External/example.com/all", Scope: scope, Forced: false, Data: nil},
+	}, backgroundErrorMetrics...))
+	app.ExpectErrorEvents(t, []internal.WantEvent{{
+		Intrinsics: map[string]interface{}{
+			"error.class":       "newrelic.myError",
+			"error.message":     "my msg",
+			"transactionName":   "OtherTransaction/Go/hello",
+			"externalCallCount": 1,
+			"externalDuration":  internal.MatchAnything,
+		},
 	}})
-	app.ExpectTxnEvents(t, []internal.WantTxnEvent{{
-		Name:              "OtherTransaction/Go/myName",
-		Zone:              "",
-		ExternalCallCount: 1,
+	app.ExpectTxnEvents(t, []internal.WantEvent{{
+		Intrinsics: map[string]interface{}{
+			"name":              "OtherTransaction/Go/hello",
+			"externalCallCount": 1,
+			"externalDuration":  internal.MatchAnything,
+			"nr.guid":           internal.MatchAnything,
+			"nr.tripId":         internal.MatchAnything,
+			"nr.pathHash":       internal.MatchAnything,
+		},
 	}})
 }
 
 func TestTraceBelowThreshold(t *testing.T) {
 	app := testApp(nil, nil, t)
-	txn := app.StartTransaction("myName", nil, helloRequest)
+	txn := app.StartTransaction("hello", nil, helloRequest)
 	txn.End()
 	app.ExpectTxnTraces(t, []internal.WantTxnTrace{})
 }
 
 func TestTraceBelowThresholdBackground(t *testing.T) {
 	app := testApp(nil, nil, t)
-	txn := app.StartTransaction("myName", nil, nil)
+	txn := app.StartTransaction("hello", nil, nil)
 	txn.End()
 	app.ExpectTxnTraces(t, []internal.WantTxnTrace{})
 }
@@ -1503,10 +1356,10 @@ func TestTraceNoSegments(t *testing.T) {
 		cfg.TransactionTracer.SegmentThreshold = 0
 	}
 	app := testApp(nil, cfgfn, t)
-	txn := app.StartTransaction("myName", nil, helloRequest)
+	txn := app.StartTransaction("hello", nil, helloRequest)
 	txn.End()
 	app.ExpectTxnTraces(t, []internal.WantTxnTrace{{
-		MetricName:  "WebTransaction/Go/myName",
+		MetricName:  "WebTransaction/Go/hello",
 		CleanURL:    "/hello",
 		NumSegments: 0,
 	}})
@@ -1520,7 +1373,7 @@ func TestTraceDisabledLocally(t *testing.T) {
 		cfg.TransactionTracer.Enabled = false
 	}
 	app := testApp(nil, cfgfn, t)
-	txn := app.StartTransaction("myName", nil, helloRequest)
+	txn := app.StartTransaction("hello", nil, helloRequest)
 	txn.End()
 	app.ExpectTxnTraces(t, []internal.WantTxnTrace{})
 }
@@ -1535,7 +1388,7 @@ func TestTraceDisabledRemotely(t *testing.T) {
 		reply.CollectTraces = false
 	}
 	app := testApp(replyfn, cfgfn, t)
-	txn := app.StartTransaction("myName", nil, helloRequest)
+	txn := app.StartTransaction("hello", nil, helloRequest)
 	txn.End()
 	app.ExpectTxnTraces(t, []internal.WantTxnTrace{})
 }
@@ -1547,7 +1400,7 @@ func TestTraceWithSegments(t *testing.T) {
 		cfg.TransactionTracer.SegmentThreshold = 0
 	}
 	app := testApp(nil, cfgfn, t)
-	txn := app.StartTransaction("myName", nil, helloRequest)
+	txn := app.StartTransaction("hello", nil, helloRequest)
 	s1 := StartSegment(txn, "s1")
 	s1.End()
 	s2 := ExternalSegment{
@@ -1564,7 +1417,7 @@ func TestTraceWithSegments(t *testing.T) {
 	s3.End()
 	txn.End()
 	app.ExpectTxnTraces(t, []internal.WantTxnTrace{{
-		MetricName:  "WebTransaction/Go/myName",
+		MetricName:  "WebTransaction/Go/hello",
 		CleanURL:    "/hello",
 		NumSegments: 3,
 	}})
@@ -1577,7 +1430,7 @@ func TestTraceSegmentsBelowThreshold(t *testing.T) {
 		cfg.TransactionTracer.SegmentThreshold = 1 * time.Hour
 	}
 	app := testApp(nil, cfgfn, t)
-	txn := app.StartTransaction("myName", nil, helloRequest)
+	txn := app.StartTransaction("hello", nil, helloRequest)
 	s1 := StartSegment(txn, "s1")
 	s1.End()
 	s2 := ExternalSegment{
@@ -1594,7 +1447,7 @@ func TestTraceSegmentsBelowThreshold(t *testing.T) {
 	s3.End()
 	txn.End()
 	app.ExpectTxnTraces(t, []internal.WantTxnTrace{{
-		MetricName:  "WebTransaction/Go/myName",
+		MetricName:  "WebTransaction/Go/hello",
 		CleanURL:    "/hello",
 		NumSegments: 0,
 	}})

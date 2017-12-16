@@ -1,6 +1,7 @@
 package pgx_test
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"net"
@@ -13,7 +14,35 @@ import (
 	"time"
 
 	"github.com/jackc/pgx"
+	"github.com/jackc/pgx/pgtype"
 )
+
+func TestCrateDBConnect(t *testing.T) {
+	t.Parallel()
+
+	if cratedbConnConfig == nil {
+		t.Skip("Skipping due to undefined cratedbConnConfig")
+	}
+
+	conn, err := pgx.Connect(*cratedbConnConfig)
+	if err != nil {
+		t.Fatalf("Unable to establish connection: %v", err)
+	}
+
+	var result int
+	err = conn.QueryRow("select 1 +1").Scan(&result)
+	if err != nil {
+		t.Fatalf("QueryRow Scan unexpectedly failed: %v", err)
+	}
+	if result != 2 {
+		t.Errorf("bad result: %d", result)
+	}
+
+	err = conn.Close()
+	if err != nil {
+		t.Fatal("Unable to close connection")
+	}
+}
 
 func TestConnect(t *testing.T) {
 	t.Parallel()
@@ -27,12 +56,8 @@ func TestConnect(t *testing.T) {
 		t.Error("Runtime parameters not stored")
 	}
 
-	if conn.Pid == 0 {
+	if conn.PID() == 0 {
 		t.Error("Backend PID not stored")
-	}
-
-	if conn.SecretKey == 0 {
-		t.Error("Backend secret key not stored")
 	}
 
 	var currentDB string
@@ -532,8 +557,227 @@ func TestParseDSN(t *testing.T) {
 	}
 }
 
+func TestParseConnectionString(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		url        string
+		connParams pgx.ConnConfig
+	}{
+		{
+			url: "postgres://jack:secret@localhost:5432/mydb?sslmode=prefer",
+			connParams: pgx.ConnConfig{
+				User:     "jack",
+				Password: "secret",
+				Host:     "localhost",
+				Port:     5432,
+				Database: "mydb",
+				TLSConfig: &tls.Config{
+					InsecureSkipVerify: true,
+				},
+				UseFallbackTLS:    true,
+				FallbackTLSConfig: nil,
+				RuntimeParams:     map[string]string{},
+			},
+		},
+		{
+			url: "postgres://jack:secret@localhost:5432/mydb?sslmode=disable",
+			connParams: pgx.ConnConfig{
+				User:              "jack",
+				Password:          "secret",
+				Host:              "localhost",
+				Port:              5432,
+				Database:          "mydb",
+				TLSConfig:         nil,
+				UseFallbackTLS:    false,
+				FallbackTLSConfig: nil,
+				RuntimeParams:     map[string]string{},
+			},
+		},
+		{
+			url: "postgres://jack:secret@localhost:5432/mydb",
+			connParams: pgx.ConnConfig{
+				User:     "jack",
+				Password: "secret",
+				Host:     "localhost",
+				Port:     5432,
+				Database: "mydb",
+				TLSConfig: &tls.Config{
+					InsecureSkipVerify: true,
+				},
+				UseFallbackTLS:    true,
+				FallbackTLSConfig: nil,
+				RuntimeParams:     map[string]string{},
+			},
+		},
+		{
+			url: "postgresql://jack:secret@localhost:5432/mydb",
+			connParams: pgx.ConnConfig{
+				User:     "jack",
+				Password: "secret",
+				Host:     "localhost",
+				Port:     5432,
+				Database: "mydb",
+				TLSConfig: &tls.Config{
+					InsecureSkipVerify: true,
+				},
+				UseFallbackTLS:    true,
+				FallbackTLSConfig: nil,
+				RuntimeParams:     map[string]string{},
+			},
+		},
+		{
+			url: "postgres://jack@localhost:5432/mydb",
+			connParams: pgx.ConnConfig{
+				User:     "jack",
+				Host:     "localhost",
+				Port:     5432,
+				Database: "mydb",
+				TLSConfig: &tls.Config{
+					InsecureSkipVerify: true,
+				},
+				UseFallbackTLS:    true,
+				FallbackTLSConfig: nil,
+				RuntimeParams:     map[string]string{},
+			},
+		},
+		{
+			url: "postgres://jack@localhost/mydb",
+			connParams: pgx.ConnConfig{
+				User:     "jack",
+				Host:     "localhost",
+				Database: "mydb",
+				TLSConfig: &tls.Config{
+					InsecureSkipVerify: true,
+				},
+				UseFallbackTLS:    true,
+				FallbackTLSConfig: nil,
+				RuntimeParams:     map[string]string{},
+			},
+		},
+		{
+			url: "postgres://jack@localhost/mydb?application_name=pgxtest&search_path=myschema",
+			connParams: pgx.ConnConfig{
+				User:     "jack",
+				Host:     "localhost",
+				Database: "mydb",
+				TLSConfig: &tls.Config{
+					InsecureSkipVerify: true,
+				},
+				UseFallbackTLS:    true,
+				FallbackTLSConfig: nil,
+				RuntimeParams: map[string]string{
+					"application_name": "pgxtest",
+					"search_path":      "myschema",
+				},
+			},
+		},
+		{
+			url: "user=jack password=secret host=localhost port=5432 dbname=mydb sslmode=disable",
+			connParams: pgx.ConnConfig{
+				User:          "jack",
+				Password:      "secret",
+				Host:          "localhost",
+				Port:          5432,
+				Database:      "mydb",
+				RuntimeParams: map[string]string{},
+			},
+		},
+		{
+			url: "user=jack password=secret host=localhost port=5432 dbname=mydb sslmode=prefer",
+			connParams: pgx.ConnConfig{
+				User:     "jack",
+				Password: "secret",
+				Host:     "localhost",
+				Port:     5432,
+				Database: "mydb",
+				TLSConfig: &tls.Config{
+					InsecureSkipVerify: true,
+				},
+				UseFallbackTLS:    true,
+				FallbackTLSConfig: nil,
+				RuntimeParams:     map[string]string{},
+			},
+		},
+		{
+			url: "user=jack password=secret host=localhost port=5432 dbname=mydb",
+			connParams: pgx.ConnConfig{
+				User:     "jack",
+				Password: "secret",
+				Host:     "localhost",
+				Port:     5432,
+				Database: "mydb",
+				TLSConfig: &tls.Config{
+					InsecureSkipVerify: true,
+				},
+				UseFallbackTLS:    true,
+				FallbackTLSConfig: nil,
+				RuntimeParams:     map[string]string{},
+			},
+		},
+		{
+			url: "user=jack host=localhost port=5432 dbname=mydb",
+			connParams: pgx.ConnConfig{
+				User:     "jack",
+				Host:     "localhost",
+				Port:     5432,
+				Database: "mydb",
+				TLSConfig: &tls.Config{
+					InsecureSkipVerify: true,
+				},
+				UseFallbackTLS:    true,
+				FallbackTLSConfig: nil,
+				RuntimeParams:     map[string]string{},
+			},
+		},
+		{
+			url: "user=jack host=localhost dbname=mydb",
+			connParams: pgx.ConnConfig{
+				User:     "jack",
+				Host:     "localhost",
+				Database: "mydb",
+				TLSConfig: &tls.Config{
+					InsecureSkipVerify: true,
+				},
+				UseFallbackTLS:    true,
+				FallbackTLSConfig: nil,
+				RuntimeParams:     map[string]string{},
+			},
+		},
+		{
+			url: "user=jack host=localhost dbname=mydb application_name=pgxtest search_path=myschema",
+			connParams: pgx.ConnConfig{
+				User:     "jack",
+				Host:     "localhost",
+				Database: "mydb",
+				TLSConfig: &tls.Config{
+					InsecureSkipVerify: true,
+				},
+				UseFallbackTLS:    true,
+				FallbackTLSConfig: nil,
+				RuntimeParams: map[string]string{
+					"application_name": "pgxtest",
+					"search_path":      "myschema",
+				},
+			},
+		},
+	}
+
+	for i, tt := range tests {
+		connParams, err := pgx.ParseConnectionString(tt.url)
+		if err != nil {
+			t.Errorf("%d. Unexpected error from pgx.ParseDSN(%q) => %v", i, tt.url, err)
+			continue
+		}
+
+		if !reflect.DeepEqual(connParams, tt.connParams) {
+			t.Errorf("%d. expected %#v got %#v", i, tt.connParams, connParams)
+		}
+	}
+}
+
 func TestParseEnvLibpq(t *testing.T) {
-	pgEnvvars := []string{"PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD", "PGAPPNAME"}
+	pgEnvvars := []string{"PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD", "PGAPPNAME", "PGSSLMODE"}
 
 	savedEnv := make(map[string]string)
 	for _, n := range pgEnvvars {
@@ -637,7 +881,7 @@ func TestParseEnvLibpq(t *testing.T) {
 				"PGSSLMODE": "require",
 			},
 			config: pgx.ConnConfig{
-				TLSConfig:      &tls.Config{},
+				TLSConfig:      &tls.Config{InsecureSkipVerify: true},
 				UseFallbackTLS: false,
 				RuntimeParams:  map[string]string{},
 			},
@@ -816,6 +1060,197 @@ func TestExecFailure(t *testing.T) {
 	}
 }
 
+func TestExecExContextWithoutCancelation(t *testing.T) {
+	t.Parallel()
+
+	conn := mustConnect(t, *defaultConnConfig)
+	defer closeConn(t, conn)
+
+	ctx, cancelFunc := context.WithCancel(context.Background())
+	defer cancelFunc()
+
+	commandTag, err := conn.ExecEx(ctx, "create temporary table foo(id integer primary key);", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if commandTag != "CREATE TABLE" {
+		t.Fatalf("Unexpected results from ExecEx: %v", commandTag)
+	}
+}
+
+func TestExecExContextFailureWithoutCancelation(t *testing.T) {
+	t.Parallel()
+
+	conn := mustConnect(t, *defaultConnConfig)
+	defer closeConn(t, conn)
+
+	ctx, cancelFunc := context.WithCancel(context.Background())
+	defer cancelFunc()
+
+	if _, err := conn.ExecEx(ctx, "selct;", nil); err == nil {
+		t.Fatal("Expected SQL syntax error")
+	}
+
+	rows, _ := conn.Query("select 1")
+	rows.Close()
+	if rows.Err() != nil {
+		t.Fatalf("ExecEx failure appears to have broken connection: %v", rows.Err())
+	}
+}
+
+func TestExecExContextCancelationCancelsQuery(t *testing.T) {
+	t.Parallel()
+
+	conn := mustConnect(t, *defaultConnConfig)
+	defer closeConn(t, conn)
+
+	ctx, cancelFunc := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		cancelFunc()
+	}()
+
+	_, err := conn.ExecEx(ctx, "select pg_sleep(60)", nil)
+	if err != context.Canceled {
+		t.Fatalf("Expected context.Canceled err, got %v", err)
+	}
+
+	ensureConnValid(t, conn)
+}
+
+func TestExecExExtendedProtocol(t *testing.T) {
+	t.Parallel()
+
+	conn := mustConnect(t, *defaultConnConfig)
+	defer closeConn(t, conn)
+
+	ctx, cancelFunc := context.WithCancel(context.Background())
+	defer cancelFunc()
+
+	commandTag, err := conn.ExecEx(ctx, "create temporary table foo(name varchar primary key);", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if commandTag != "CREATE TABLE" {
+		t.Fatalf("Unexpected results from ExecEx: %v", commandTag)
+	}
+
+	commandTag, err = conn.ExecEx(
+		ctx,
+		"insert into foo(name) values($1);",
+		nil,
+		"bar",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if commandTag != "INSERT 0 1" {
+		t.Fatalf("Unexpected results from ExecEx: %v", commandTag)
+	}
+
+	ensureConnValid(t, conn)
+}
+
+func TestExecExSimpleProtocol(t *testing.T) {
+	t.Parallel()
+
+	conn := mustConnect(t, *defaultConnConfig)
+	defer closeConn(t, conn)
+
+	ctx, cancelFunc := context.WithCancel(context.Background())
+	defer cancelFunc()
+
+	commandTag, err := conn.ExecEx(ctx, "create temporary table foo(name varchar primary key);", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if commandTag != "CREATE TABLE" {
+		t.Fatalf("Unexpected results from ExecEx: %v", commandTag)
+	}
+
+	commandTag, err = conn.ExecEx(
+		ctx,
+		"insert into foo(name) values($1);",
+		&pgx.QueryExOptions{SimpleProtocol: true},
+		"bar'; drop table foo;--",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if commandTag != "INSERT 0 1" {
+		t.Fatalf("Unexpected results from ExecEx: %v", commandTag)
+	}
+}
+
+func TestConnExecExSuppliedCorrectParameterOIDs(t *testing.T) {
+	t.Parallel()
+
+	conn := mustConnect(t, *defaultConnConfig)
+	defer closeConn(t, conn)
+
+	mustExec(t, conn, "create temporary table foo(name varchar primary key);")
+
+	commandTag, err := conn.ExecEx(
+		context.Background(),
+		"insert into foo(name) values($1);",
+		&pgx.QueryExOptions{ParameterOIDs: []pgtype.OID{pgtype.VarcharOID}},
+		"bar'; drop table foo;--",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if commandTag != "INSERT 0 1" {
+		t.Fatalf("Unexpected results from ExecEx: %v", commandTag)
+	}
+}
+
+func TestConnExecExSuppliedIncorrectParameterOIDs(t *testing.T) {
+	t.Parallel()
+
+	conn := mustConnect(t, *defaultConnConfig)
+	defer closeConn(t, conn)
+
+	mustExec(t, conn, "create temporary table foo(name varchar primary key);")
+
+	_, err := conn.ExecEx(
+		context.Background(),
+		"insert into foo(name) values($1);",
+		&pgx.QueryExOptions{ParameterOIDs: []pgtype.OID{pgtype.Int4OID}},
+		"bar'; drop table foo;--",
+	)
+	if err == nil {
+		t.Fatal("expected error but got none")
+	}
+}
+
+func TestConnExecExIncorrectParameterOIDsAfterAnotherQuery(t *testing.T) {
+	t.Parallel()
+
+	conn := mustConnect(t, *defaultConnConfig)
+	defer closeConn(t, conn)
+
+	mustExec(t, conn, "create temporary table foo(name varchar primary key);")
+
+	var s string
+	err := conn.QueryRow("insert into foo(name) values('baz') returning name;").Scan(&s)
+	if err != nil {
+		t.Errorf("Executing query failed: %v", err)
+	}
+	if s != "baz" {
+		t.Errorf("Query did not return expected value: %v", s)
+	}
+
+	_, err = conn.ExecEx(
+		context.Background(),
+		"insert into foo(name) values($1);",
+		&pgx.QueryExOptions{ParameterOIDs: []pgtype.OID{pgtype.Int4OID}},
+		"bar'; drop table foo;--",
+	)
+	if err == nil {
+		t.Fatal("expected error but got none")
+	}
+}
+
 func TestPrepare(t *testing.T) {
 	t.Parallel()
 
@@ -914,7 +1349,7 @@ func TestPrepareQueryManyParameters(t *testing.T) {
 		args := make([]interface{}, 0, tt.count)
 		for j := 0; j < tt.count; j++ {
 			params = append(params, fmt.Sprintf("($%d::text)", j+1))
-			args = append(args, strconv.FormatInt(int64(j), 10))
+			args = append(args, strconv.Itoa(j))
 		}
 
 		sql := "values" + strings.Join(params, ", ")
@@ -981,6 +1416,34 @@ func TestPrepareIdempotency(t *testing.T) {
 	}
 }
 
+func TestPrepareEx(t *testing.T) {
+	t.Parallel()
+
+	conn := mustConnect(t, *defaultConnConfig)
+	defer closeConn(t, conn)
+
+	_, err := conn.PrepareEx(context.Background(), "test", "select $1", &pgx.PrepareExOptions{ParameterOIDs: []pgtype.OID{pgtype.TextOID}})
+	if err != nil {
+		t.Errorf("Unable to prepare statement: %v", err)
+		return
+	}
+
+	var s string
+	err = conn.QueryRow("test", "hello").Scan(&s)
+	if err != nil {
+		t.Errorf("Executing prepared statement failed: %v", err)
+	}
+
+	if s != "hello" {
+		t.Errorf("Prepared statement did not return expected value: %v", s)
+	}
+
+	err = conn.Deallocate("test")
+	if err != nil {
+		t.Errorf("conn.Deallocate failed: %v", err)
+	}
+}
+
 func TestListenNotify(t *testing.T) {
 	t.Parallel()
 
@@ -997,7 +1460,7 @@ func TestListenNotify(t *testing.T) {
 	mustExec(t, notifier, "notify chat")
 
 	// when notification is waiting on the socket to be read
-	notification, err := listener.WaitForNotification(time.Second)
+	notification, err := listener.WaitForNotification(context.Background())
 	if err != nil {
 		t.Fatalf("Unexpected error on WaitForNotification: %v", err)
 	}
@@ -1012,7 +1475,10 @@ func TestListenNotify(t *testing.T) {
 	if rows.Err() != nil {
 		t.Fatalf("Unexpected error on Query: %v", rows.Err())
 	}
-	notification, err = listener.WaitForNotification(0)
+
+	ctx, cancelFn := context.WithCancel(context.Background())
+	cancelFn()
+	notification, err = listener.WaitForNotification(ctx)
 	if err != nil {
 		t.Fatalf("Unexpected error on WaitForNotification: %v", err)
 	}
@@ -1021,8 +1487,9 @@ func TestListenNotify(t *testing.T) {
 	}
 
 	// when timeout occurs
-	notification, err = listener.WaitForNotification(time.Millisecond)
-	if err != pgx.ErrNotificationTimeout {
+	ctx, _ = context.WithTimeout(context.Background(), time.Millisecond)
+	notification, err = listener.WaitForNotification(ctx)
+	if err != context.DeadlineExceeded {
 		t.Errorf("WaitForNotification returned the wrong kind of error: %v", err)
 	}
 	if notification != nil {
@@ -1031,7 +1498,7 @@ func TestListenNotify(t *testing.T) {
 
 	// listener can listen again after a timeout
 	mustExec(t, notifier, "notify chat")
-	notification, err = listener.WaitForNotification(time.Second)
+	notification, err = listener.WaitForNotification(context.Background())
 	if err != nil {
 		t.Fatalf("Unexpected error on WaitForNotification: %v", err)
 	}
@@ -1056,7 +1523,7 @@ func TestUnlistenSpecificChannel(t *testing.T) {
 	mustExec(t, notifier, "notify unlisten_test")
 
 	// when notification is waiting on the socket to be read
-	notification, err := listener.WaitForNotification(time.Second)
+	notification, err := listener.WaitForNotification(context.Background())
 	if err != nil {
 		t.Fatalf("Unexpected error on WaitForNotification: %v", err)
 	}
@@ -1076,8 +1543,10 @@ func TestUnlistenSpecificChannel(t *testing.T) {
 	if rows.Err() != nil {
 		t.Fatalf("Unexpected error on Query: %v", rows.Err())
 	}
-	notification, err = listener.WaitForNotification(100 * time.Millisecond)
-	if err != pgx.ErrNotificationTimeout {
+
+	ctx, _ := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	notification, err = listener.WaitForNotification(ctx)
+	if err != context.DeadlineExceeded {
 		t.Errorf("WaitForNotification returned the wrong kind of error: %v", err)
 	}
 }
@@ -1129,13 +1598,9 @@ func TestListenNotifyWhileBusyIsSafe(t *testing.T) {
 		}
 	}()
 
-	notifierDone := make(chan bool)
 	go func() {
 		conn := mustConnect(t, *defaultConnConfig)
 		defer closeConn(t, conn)
-		defer func() {
-			notifierDone <- true
-		}()
 
 		for i := 0; i < 100000; i++ {
 			mustExec(t, conn, "notify busysafe, 'hello'")
@@ -1159,7 +1624,8 @@ func TestListenNotifySelfNotification(t *testing.T) {
 	// Notify self and WaitForNotification immediately
 	mustExec(t, conn, "notify self")
 
-	notification, err := conn.WaitForNotification(time.Second)
+	ctx, _ := context.WithTimeout(context.Background(), time.Second)
+	notification, err := conn.WaitForNotification(ctx)
 	if err != nil {
 		t.Fatalf("Unexpected error on WaitForNotification: %v", err)
 	}
@@ -1176,7 +1642,8 @@ func TestListenNotifySelfNotification(t *testing.T) {
 		t.Fatalf("Unexpected error on Query: %v", rows.Err())
 	}
 
-	notification, err = conn.WaitForNotification(time.Second)
+	ctx, _ = context.WithTimeout(context.Background(), time.Second)
+	notification, err = conn.WaitForNotification(ctx)
 	if err != nil {
 		t.Fatalf("Unexpected error on WaitForNotification: %v", err)
 	}
@@ -1227,7 +1694,7 @@ func TestFatalRxError(t *testing.T) {
 	}
 	defer otherConn.Close()
 
-	if _, err := otherConn.Exec("select pg_terminate_backend($1)", conn.Pid); err != nil {
+	if _, err := otherConn.Exec("select pg_terminate_backend($1)", conn.PID()); err != nil {
 		t.Fatalf("Unable to kill backend PostgreSQL process: %v", err)
 	}
 
@@ -1253,7 +1720,7 @@ func TestFatalTxError(t *testing.T) {
 			}
 			defer otherConn.Close()
 
-			_, err = otherConn.Exec("select pg_terminate_backend($1)", conn.Pid)
+			_, err = otherConn.Exec("select pg_terminate_backend($1)", conn.PID())
 			if err != nil {
 				t.Fatalf("Unable to kill backend PostgreSQL process: %v", err)
 			}
@@ -1364,26 +1831,17 @@ func TestCatchSimultaneousConnectionQueryAndExec(t *testing.T) {
 }
 
 type testLog struct {
-	lvl int
-	msg string
-	ctx []interface{}
+	lvl  pgx.LogLevel
+	msg  string
+	data map[string]interface{}
 }
 
 type testLogger struct {
 	logs []testLog
 }
 
-func (l *testLogger) Debug(msg string, ctx ...interface{}) {
-	l.logs = append(l.logs, testLog{lvl: pgx.LogLevelDebug, msg: msg, ctx: ctx})
-}
-func (l *testLogger) Info(msg string, ctx ...interface{}) {
-	l.logs = append(l.logs, testLog{lvl: pgx.LogLevelInfo, msg: msg, ctx: ctx})
-}
-func (l *testLogger) Warn(msg string, ctx ...interface{}) {
-	l.logs = append(l.logs, testLog{lvl: pgx.LogLevelWarn, msg: msg, ctx: ctx})
-}
-func (l *testLogger) Error(msg string, ctx ...interface{}) {
-	l.logs = append(l.logs, testLog{lvl: pgx.LogLevelError, msg: msg, ctx: ctx})
+func (l *testLogger) Log(level pgx.LogLevel, msg string, data map[string]interface{}) {
+	l.logs = append(l.logs, testLog{lvl: level, msg: msg, data: data})
 }
 
 func TestSetLogger(t *testing.T) {
@@ -1457,4 +1915,96 @@ func TestSetLogLevel(t *testing.T) {
 	if len(logger.logs) == 0 {
 		t.Fatal("Expected logger to be called, but it wasn't")
 	}
+}
+
+func TestIdentifierSanitize(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		ident    pgx.Identifier
+		expected string
+	}{
+		{
+			ident:    pgx.Identifier{`foo`},
+			expected: `"foo"`,
+		},
+		{
+			ident:    pgx.Identifier{`select`},
+			expected: `"select"`,
+		},
+		{
+			ident:    pgx.Identifier{`foo`, `bar`},
+			expected: `"foo"."bar"`,
+		},
+		{
+			ident:    pgx.Identifier{`you should " not do this`},
+			expected: `"you should "" not do this"`,
+		},
+		{
+			ident:    pgx.Identifier{`you should " not do this`, `please don't`},
+			expected: `"you should "" not do this"."please don't"`,
+		},
+	}
+
+	for i, tt := range tests {
+		qval := tt.ident.Sanitize()
+		if qval != tt.expected {
+			t.Errorf("%d. Expected Sanitize %v to return %v but it was %v", i, tt.ident, tt.expected, qval)
+		}
+	}
+}
+
+func TestConnOnNotice(t *testing.T) {
+	t.Parallel()
+
+	var msg string
+
+	connConfig := *defaultConnConfig
+	connConfig.OnNotice = func(c *pgx.Conn, notice *pgx.Notice) {
+		msg = notice.Message
+	}
+	conn := mustConnect(t, connConfig)
+	defer closeConn(t, conn)
+
+	_, err := conn.Exec(`do $$
+begin
+  raise notice 'hello, world';
+end$$;`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if msg != "hello, world" {
+		t.Errorf("msg => %v, want %v", msg, "hello, world")
+	}
+
+	ensureConnValid(t, conn)
+}
+
+func TestConnInitConnInfo(t *testing.T) {
+	conn := mustConnect(t, *defaultConnConfig)
+	defer closeConn(t, conn)
+
+	// spot check that the standard postgres type names aren't qualified
+	nameOIDs := map[string]pgtype.OID{
+		"_int8": pgtype.Int8ArrayOID,
+		"int8": pgtype.Int8OID,
+		"json": pgtype.JSONOID,
+		"text": pgtype.TextOID,
+	}
+	for name, oid := range nameOIDs {
+		dtByName, ok := conn.ConnInfo.DataTypeForName(name)
+		if !ok {
+			t.Fatalf("Expected type named %v to be present", name)
+		}
+		dtByOID, ok := conn.ConnInfo.DataTypeForOID(oid)
+		if !ok {
+			t.Fatalf("Expected type OID %v to be present", oid)
+		}
+		if dtByName != dtByOID {
+			t.Fatalf("Expected type named %v to be the same as type OID %v", name, oid)
+		}
+	}
+
+	ensureConnValid(t, conn)
 }

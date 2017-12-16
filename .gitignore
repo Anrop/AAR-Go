@@ -23,8 +23,8 @@ _testmain.go
 *.test
 
 # gb specific folders
-bin
-pkg
+/bin/
+/pkg/
 
 # Dotenv file
 .env

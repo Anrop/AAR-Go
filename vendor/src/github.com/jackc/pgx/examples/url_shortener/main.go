@@ -1,11 +1,13 @@
 package main
 
 import (
-	"github.com/jackc/pgx"
-	log "gopkg.in/inconshreveable/log15.v2"
 	"io/ioutil"
 	"net/http"
 	"os"
+
+	"github.com/jackc/pgx"
+	"github.com/jackc/pgx/log/log15adapter"
+	log "gopkg.in/inconshreveable/log15.v2"
 )
 
 var pool *pgx.ConnPool
@@ -26,19 +28,9 @@ func afterConnect(conn *pgx.Conn) (err error) {
 		return
 	}
 
-	// There technically is a small race condition in doing an upsert with a CTE
-	// where one of two simultaneous requests to the shortened URL would fail
-	// with a unique index violation. As the point of this demo is pgx usage and
-	// not how to perfectly upsert in PostgreSQL it is deemed acceptable.
 	_, err = conn.Prepare("putUrl", `
-    with upsert as (
-      update shortened_urls
-      set url=$2
-      where id=$1
-      returning *
-    )
-    insert into shortened_urls(id, url)
-    select $1, $2 where not exists(select 1 from upsert)
+    insert into shortened_urls(id, url) values ($1, $2)
+    on conflict (id) do update set url=excluded.url
   `)
 	return
 }
@@ -99,6 +91,8 @@ func urlHandler(w http.ResponseWriter, req *http.Request) {
 }
 
 func main() {
+	logger := log15adapter.NewLogger(log.New("module", "pgx"))
+
 	var err error
 	connPoolConfig := pgx.ConnPoolConfig{
 		ConnConfig: pgx.ConnConfig{
@@ -106,7 +100,7 @@ func main() {
 			User:     "jack",
 			Password: "jack",
 			Database: "url_shortener",
-			Logger:   log.New("module", "pgx"),
+			Logger:   logger,
 		},
 		MaxConnections: 5,
 		AfterConnect:   afterConnect,
