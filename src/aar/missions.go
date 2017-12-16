@@ -113,13 +113,29 @@ func outputMission(missionID string, w http.ResponseWriter) error {
 	row := DB.QueryRow(`
 		SELECT
 			id,
+			created_at,
+			EXTRACT(
+				epoch FROM (
+					SELECT timestamp
+					FROM events
+					WHERE events.mission_id = missions.id
+					ORDER BY timestamp DESC
+					LIMIT 1
+				) - (
+					SELECT timestamp
+					FROM events
+					WHERE events.mission_id = missions.id
+					ORDER BY timestamp ASC
+					LIMIT 1
+				)
+			)::int AS length,
 			name,
 			world
 		FROM missions
 		WHERE id = $1
 	`, missionID)
 	mission := new(Mission)
-	err := row.Scan(&mission.ID, &mission.Name, &mission.World)
+	err := row.Scan(&mission.ID, &mission.CreatedAt, &mission.Length, &mission.Name, &mission.World)
 
 	if err != nil {
 		return err
