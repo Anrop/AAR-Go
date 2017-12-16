@@ -13,12 +13,12 @@ import (
 func TestStartEndSegment(t *testing.T) {
 	start := time.Date(2014, time.November, 28, 1, 1, 0, 0, time.UTC)
 
-	tr := &Tracer{}
+	tr := &TxnData{}
 	token := StartSegment(tr, start)
 	stop := start.Add(1 * time.Second)
-	end := endSegment(tr, token, stop)
-	if !end.valid {
-		t.Error(end.valid)
+	end, err := endSegment(tr, token, stop)
+	if nil != err {
+		t.Error(err)
 	}
 	if end.exclusive != end.duration {
 		t.Error(end.exclusive, end.duration)
@@ -34,72 +34,30 @@ func TestStartEndSegment(t *testing.T) {
 	}
 }
 
-func TestTracerRealloc(t *testing.T) {
-	max := 3 * startingStackDepthAlloc
-	start := time.Date(2014, time.November, 28, 1, 1, 0, 0, time.UTC)
-	now := start
-	startStack := make([]SegmentStartTime, max)
-
-	tr := &Tracer{}
-	for i := 0; i < max; i++ {
-		startStack[i] = StartSegment(tr, now)
-		now = now.Add(time.Second)
-	}
-
-	for i := max - 1; i >= 0; i-- {
-		now = now.Add(time.Second)
-		end := endSegment(tr, startStack[i], now)
-
-		if !end.valid {
-			t.Error(end.valid)
-		}
-		if end.exclusive != 2*time.Second {
-			t.Error(end.exclusive)
-		}
-		expectDuration := time.Duration((max-i)*2) * time.Second
-		if end.duration != expectDuration {
-			t.Error(end.duration, expectDuration)
-		}
-		expectStart := start.Add(time.Duration(i) * time.Second)
-		if end.start.Time != expectStart {
-			t.Error(end.start, expectStart)
-		}
-		expectStop := expectStart.Add(expectDuration)
-		if end.stop.Time != expectStop {
-			t.Error(end.stop, expectStop)
-		}
-	}
-	rootChildren := time.Duration(2*max) * time.Second
-	children := TracerRootChildren(tr)
-	if children != rootChildren {
-		t.Error(children, rootChildren)
-	}
-}
-
 func TestMultipleChildren(t *testing.T) {
 	start := time.Date(2014, time.November, 28, 1, 1, 0, 0, time.UTC)
-	tr := &Tracer{}
+	tr := &TxnData{}
 
 	t1 := StartSegment(tr, start.Add(1*time.Second))
 	t2 := StartSegment(tr, start.Add(2*time.Second))
-	end2 := endSegment(tr, t2, start.Add(3*time.Second))
+	end2, err2 := endSegment(tr, t2, start.Add(3*time.Second))
 	t3 := StartSegment(tr, start.Add(4*time.Second))
-	end3 := endSegment(tr, t3, start.Add(5*time.Second))
-	end1 := endSegment(tr, t1, start.Add(6*time.Second))
+	end3, err3 := endSegment(tr, t3, start.Add(5*time.Second))
+	end1, err1 := endSegment(tr, t1, start.Add(6*time.Second))
 	t4 := StartSegment(tr, start.Add(7*time.Second))
-	end4 := endSegment(tr, t4, start.Add(8*time.Second))
+	end4, err4 := endSegment(tr, t4, start.Add(8*time.Second))
 
-	if end1.duration != 5*time.Second || end1.exclusive != 3*time.Second {
-		t.Error(end1)
+	if nil != err1 || end1.duration != 5*time.Second || end1.exclusive != 3*time.Second {
+		t.Error(end1, err1)
 	}
-	if end2.duration != end2.exclusive || end2.duration != time.Second {
-		t.Error(end2)
+	if nil != err2 || end2.duration != end2.exclusive || end2.duration != time.Second {
+		t.Error(end2, err2)
 	}
-	if end3.duration != end3.exclusive || end3.duration != time.Second {
-		t.Error(end3)
+	if nil != err3 || end3.duration != end3.exclusive || end3.duration != time.Second {
+		t.Error(end3, err3)
 	}
-	if end4.duration != end4.exclusive || end4.duration != time.Second {
-		t.Error(end4)
+	if nil != err4 || end4.duration != end4.exclusive || end4.duration != time.Second {
+		t.Error(end4, err4)
 	}
 	children := TracerRootChildren(tr)
 	if children != 6*time.Second {
@@ -109,96 +67,96 @@ func TestMultipleChildren(t *testing.T) {
 
 func TestInvalidStart(t *testing.T) {
 	start := time.Date(2014, time.November, 28, 1, 1, 0, 0, time.UTC)
-	tr := &Tracer{}
+	tr := &TxnData{}
 
-	end := endSegment(tr, SegmentStartTime{}, start.Add(1*time.Second))
-	if end.valid {
-		t.Error(end.valid)
+	end, err := endSegment(tr, SegmentStartTime{}, start.Add(1*time.Second))
+	if err != errMalformedSegment {
+		t.Error(end, err)
 	}
 	StartSegment(tr, start.Add(2*time.Second))
-	end = endSegment(tr, SegmentStartTime{}, start.Add(3*time.Second))
-	if end.valid {
-		t.Error(end.valid)
+	end, err = endSegment(tr, SegmentStartTime{}, start.Add(3*time.Second))
+	if err != errMalformedSegment {
+		t.Error(end, err)
 	}
 }
 
 func TestSegmentAlreadyEnded(t *testing.T) {
 	start := time.Date(2014, time.November, 28, 1, 1, 0, 0, time.UTC)
-	tr := &Tracer{}
+	tr := &TxnData{}
 
 	t1 := StartSegment(tr, start.Add(1*time.Second))
-	end := endSegment(tr, t1, start.Add(2*time.Second))
-	if !end.valid {
-		t.Error(end)
+	end, err := endSegment(tr, t1, start.Add(2*time.Second))
+	if err != nil {
+		t.Error(end, err)
 	}
-	end = endSegment(tr, t1, start.Add(3*time.Second))
-	if end.valid {
-		t.Error(end)
+	end, err = endSegment(tr, t1, start.Add(3*time.Second))
+	if err != errSegmentOrder {
+		t.Error(end, err)
 	}
 }
 
 func TestSegmentBadStamp(t *testing.T) {
 	start := time.Date(2014, time.November, 28, 1, 1, 0, 0, time.UTC)
-	tr := &Tracer{}
+	tr := &TxnData{}
 
 	t1 := StartSegment(tr, start.Add(1*time.Second))
 	t1.Stamp++
-	end := endSegment(tr, t1, start.Add(2*time.Second))
-	if end.valid {
-		t.Error(end)
+	end, err := endSegment(tr, t1, start.Add(2*time.Second))
+	if err != errSegmentOrder {
+		t.Error(end, err)
 	}
 }
 
 func TestSegmentBadDepth(t *testing.T) {
 	start := time.Date(2014, time.November, 28, 1, 1, 0, 0, time.UTC)
-	tr := &Tracer{}
+	tr := &TxnData{}
 
 	t1 := StartSegment(tr, start.Add(1*time.Second))
 	t1.Depth++
-	end := endSegment(tr, t1, start.Add(2*time.Second))
-	if end.valid {
-		t.Error(end)
+	end, err := endSegment(tr, t1, start.Add(2*time.Second))
+	if err != errSegmentOrder {
+		t.Error(end, err)
 	}
 }
 
 func TestSegmentNegativeDepth(t *testing.T) {
 	start := time.Date(2014, time.November, 28, 1, 1, 0, 0, time.UTC)
-	tr := &Tracer{}
+	tr := &TxnData{}
 
 	t1 := StartSegment(tr, start.Add(1*time.Second))
 	t1.Depth = -1
-	end := endSegment(tr, t1, start.Add(2*time.Second))
-	if end.valid {
-		t.Error(end)
+	end, err := endSegment(tr, t1, start.Add(2*time.Second))
+	if err != errMalformedSegment {
+		t.Error(end, err)
 	}
 }
 
 func TestSegmentOutOfOrder(t *testing.T) {
 	start := time.Date(2014, time.November, 28, 1, 1, 0, 0, time.UTC)
-	tr := &Tracer{}
+	tr := &TxnData{}
 
 	t1 := StartSegment(tr, start.Add(1*time.Second))
 	t2 := StartSegment(tr, start.Add(2*time.Second))
 	t3 := StartSegment(tr, start.Add(3*time.Second))
-	end2 := endSegment(tr, t2, start.Add(4*time.Second))
-	end3 := endSegment(tr, t3, start.Add(5*time.Second))
+	end2, err2 := endSegment(tr, t2, start.Add(4*time.Second))
+	end3, err3 := endSegment(tr, t3, start.Add(5*time.Second))
 	t4 := StartSegment(tr, start.Add(6*time.Second))
-	end4 := endSegment(tr, t4, start.Add(7*time.Second))
-	end1 := endSegment(tr, t1, start.Add(8*time.Second))
+	end4, err4 := endSegment(tr, t4, start.Add(7*time.Second))
+	end1, err1 := endSegment(tr, t1, start.Add(8*time.Second))
 
-	if !end1.valid ||
+	if nil != err1 ||
 		end1.duration != 7*time.Second ||
 		end1.exclusive != 4*time.Second {
-		t.Error(end1)
+		t.Error(end1, err1)
 	}
-	if !end2.valid || end2.duration != end2.exclusive || end2.duration != 2*time.Second {
-		t.Error(end2)
+	if nil != err2 || end2.duration != end2.exclusive || end2.duration != 2*time.Second {
+		t.Error(end2, err2)
 	}
-	if end3.valid {
-		t.Error(end3)
+	if err3 != errSegmentOrder {
+		t.Error(end3, err3)
 	}
-	if !end4.valid || end4.duration != end4.exclusive || end4.duration != 1*time.Second {
-		t.Error(end4)
+	if nil != err4 || end4.duration != end4.exclusive || end4.duration != 1*time.Second {
+		t.Error(end4, err4)
 	}
 }
 
@@ -209,7 +167,7 @@ func TestSegmentOutOfOrder(t *testing.T) {
 //  0    1    2    3    4    5    6    7    8    9    10   11   12
 func TestLostChildren(t *testing.T) {
 	start := time.Date(2014, time.November, 28, 1, 1, 0, 0, time.UTC)
-	tr := &Tracer{}
+	tr := &TxnData{}
 
 	alpha := StartSegment(tr, start.Add(1*time.Second))
 	t1 := StartSegment(tr, start.Add(2*time.Second))
@@ -225,19 +183,20 @@ func TestLostChildren(t *testing.T) {
 	EndBasicSegment(tr, alpha, start.Add(12*time.Second), "alpha")
 
 	metrics := newMetricTable(100, time.Now())
-	scope := "WebTransaction/Go/zip"
-	MergeBreakdownMetrics(tr, metrics, scope, true)
+	tr.FinalName = "WebTransaction/Go/zip"
+	tr.IsWeb = true
+	MergeBreakdownMetrics(tr, metrics)
 	ExpectMetrics(t, metrics, []WantMetric{
 		{"Custom/alpha", "", false, []float64{1, 11, 7, 11, 11, 121}},
 		{"Custom/t1", "", false, []float64{1, 1, 1, 1, 1, 1}},
 		{"Custom/t2", "", false, []float64{1, 1, 1, 1, 1, 1}},
 		{"Custom/t3", "", false, []float64{1, 1, 1, 1, 1, 1}},
 		{"Custom/t4", "", false, []float64{1, 1, 1, 1, 1, 1}},
-		{"Custom/alpha", scope, false, []float64{1, 11, 7, 11, 11, 121}},
-		{"Custom/t1", scope, false, []float64{1, 1, 1, 1, 1, 1}},
-		{"Custom/t2", scope, false, []float64{1, 1, 1, 1, 1, 1}},
-		{"Custom/t3", scope, false, []float64{1, 1, 1, 1, 1, 1}},
-		{"Custom/t4", scope, false, []float64{1, 1, 1, 1, 1, 1}},
+		{"Custom/alpha", tr.FinalName, false, []float64{1, 11, 7, 11, 11, 121}},
+		{"Custom/t1", tr.FinalName, false, []float64{1, 1, 1, 1, 1, 1}},
+		{"Custom/t2", tr.FinalName, false, []float64{1, 1, 1, 1, 1, 1}},
+		{"Custom/t3", tr.FinalName, false, []float64{1, 1, 1, 1, 1, 1}},
+		{"Custom/t4", tr.FinalName, false, []float64{1, 1, 1, 1, 1, 1}},
 	})
 }
 
@@ -248,7 +207,7 @@ func TestLostChildren(t *testing.T) {
 //  0    1    2    3    4    5    6    7    8    9    10   11   12
 func TestLostChildrenRoot(t *testing.T) {
 	start := time.Date(2014, time.November, 28, 1, 1, 0, 0, time.UTC)
-	tr := &Tracer{}
+	tr := &TxnData{}
 
 	t1 := StartSegment(tr, start.Add(2*time.Second))
 	EndBasicSegment(tr, t1, start.Add(3*time.Second), "t1")
@@ -267,23 +226,24 @@ func TestLostChildrenRoot(t *testing.T) {
 	}
 
 	metrics := newMetricTable(100, time.Now())
-	scope := "WebTransaction/Go/zip"
-	MergeBreakdownMetrics(tr, metrics, scope, true)
+	tr.FinalName = "WebTransaction/Go/zip"
+	tr.IsWeb = true
+	MergeBreakdownMetrics(tr, metrics)
 	ExpectMetrics(t, metrics, []WantMetric{
 		{"Custom/t1", "", false, []float64{1, 1, 1, 1, 1, 1}},
 		{"Custom/t2", "", false, []float64{1, 1, 1, 1, 1, 1}},
 		{"Custom/t3", "", false, []float64{1, 1, 1, 1, 1, 1}},
 		{"Custom/t4", "", false, []float64{1, 1, 1, 1, 1, 1}},
-		{"Custom/t1", scope, false, []float64{1, 1, 1, 1, 1, 1}},
-		{"Custom/t2", scope, false, []float64{1, 1, 1, 1, 1, 1}},
-		{"Custom/t3", scope, false, []float64{1, 1, 1, 1, 1, 1}},
-		{"Custom/t4", scope, false, []float64{1, 1, 1, 1, 1, 1}},
+		{"Custom/t1", tr.FinalName, false, []float64{1, 1, 1, 1, 1, 1}},
+		{"Custom/t2", tr.FinalName, false, []float64{1, 1, 1, 1, 1, 1}},
+		{"Custom/t3", tr.FinalName, false, []float64{1, 1, 1, 1, 1, 1}},
+		{"Custom/t4", tr.FinalName, false, []float64{1, 1, 1, 1, 1, 1}},
 	})
 }
 
 func TestSegmentBasic(t *testing.T) {
 	start := time.Date(2014, time.November, 28, 1, 1, 0, 0, time.UTC)
-	tr := &Tracer{}
+	tr := &TxnData{}
 
 	t1 := StartSegment(tr, start.Add(1*time.Second))
 	t2 := StartSegment(tr, start.Add(2*time.Second))
@@ -297,15 +257,16 @@ func TestSegmentBasic(t *testing.T) {
 	EndBasicSegment(tr, t5, start.Add(10*time.Second), "t1")
 
 	metrics := newMetricTable(100, time.Now())
-	scope := "WebTransaction/Go/zip"
-	MergeBreakdownMetrics(tr, metrics, scope, true)
+	tr.FinalName = "WebTransaction/Go/zip"
+	tr.IsWeb = true
+	MergeBreakdownMetrics(tr, metrics)
 	ExpectMetrics(t, metrics, []WantMetric{
 		{"Custom/t1", "", false, []float64{2, 4, 3, 1, 3, 10}},
 		{"Custom/t2", "", false, []float64{1, 1, 1, 1, 1, 1}},
 		{"Custom/t3", "", false, []float64{1, 2, 2, 2, 2, 4}},
-		{"Custom/t1", scope, false, []float64{2, 4, 3, 1, 3, 10}},
-		{"Custom/t2", scope, false, []float64{1, 1, 1, 1, 1, 1}},
-		{"Custom/t3", scope, false, []float64{1, 2, 2, 2, 2, 4}},
+		{"Custom/t1", tr.FinalName, false, []float64{2, 4, 3, 1, 3, 10}},
+		{"Custom/t2", tr.FinalName, false, []float64{1, 1, 1, 1, 1, 1}},
+		{"Custom/t3", tr.FinalName, false, []float64{1, 2, 2, 2, 2, 4}},
 	})
 }
 
@@ -316,17 +277,17 @@ func parseURL(raw string) *url.URL {
 
 func TestSegmentExternal(t *testing.T) {
 	start := time.Date(2014, time.November, 28, 1, 1, 0, 0, time.UTC)
-	tr := &Tracer{}
+	tr := &TxnData{}
 
 	t1 := StartSegment(tr, start.Add(1*time.Second))
 	t2 := StartSegment(tr, start.Add(2*time.Second))
-	EndExternalSegment(tr, t2, start.Add(3*time.Second), nil)
-	EndExternalSegment(tr, t1, start.Add(4*time.Second), parseURL("http://f1.com"))
+	EndExternalSegment(tr, t2, start.Add(3*time.Second), nil, nil)
+	EndExternalSegment(tr, t1, start.Add(4*time.Second), parseURL("http://f1.com"), nil)
 	t3 := StartSegment(tr, start.Add(5*time.Second))
-	EndExternalSegment(tr, t3, start.Add(6*time.Second), parseURL("http://f1.com"))
+	EndExternalSegment(tr, t3, start.Add(6*time.Second), parseURL("http://f1.com"), nil)
 	t4 := StartSegment(tr, start.Add(7*time.Second))
 	t4.Stamp++
-	EndExternalSegment(tr, t4, start.Add(8*time.Second), parseURL("http://invalid-token.com"))
+	EndExternalSegment(tr, t4, start.Add(8*time.Second), parseURL("http://invalid-token.com"), nil)
 
 	if tr.externalCallCount != 3 {
 		t.Error(tr.externalCallCount)
@@ -335,33 +296,35 @@ func TestSegmentExternal(t *testing.T) {
 		t.Error(tr.externalDuration)
 	}
 	metrics := newMetricTable(100, time.Now())
-	scope := "WebTransaction/Go/zip"
-	MergeBreakdownMetrics(tr, metrics, scope, true)
+	tr.FinalName = "WebTransaction/Go/zip"
+	tr.IsWeb = true
+	MergeBreakdownMetrics(tr, metrics)
 	ExpectMetrics(t, metrics, []WantMetric{
 		{"External/all", "", true, []float64{3, 5, 4, 1, 3, 11}},
 		{"External/allWeb", "", true, []float64{3, 5, 4, 1, 3, 11}},
 		{"External/f1.com/all", "", false, []float64{2, 4, 3, 1, 3, 10}},
 		{"External/unknown/all", "", false, []float64{1, 1, 1, 1, 1, 1}},
-		{"External/f1.com/all", scope, false, []float64{2, 4, 3, 1, 3, 10}},
-		{"External/unknown/all", scope, false, []float64{1, 1, 1, 1, 1, 1}},
+		{"External/f1.com/all", tr.FinalName, false, []float64{2, 4, 3, 1, 3, 10}},
+		{"External/unknown/all", tr.FinalName, false, []float64{1, 1, 1, 1, 1, 1}},
 	})
 
 	metrics = newMetricTable(100, time.Now())
-	scope = "OtherTransaction/Go/zip"
-	MergeBreakdownMetrics(tr, metrics, scope, false)
+	tr.FinalName = "OtherTransaction/Go/zip"
+	tr.IsWeb = false
+	MergeBreakdownMetrics(tr, metrics)
 	ExpectMetrics(t, metrics, []WantMetric{
 		{"External/all", "", true, []float64{3, 5, 4, 1, 3, 11}},
 		{"External/allOther", "", true, []float64{3, 5, 4, 1, 3, 11}},
 		{"External/f1.com/all", "", false, []float64{2, 4, 3, 1, 3, 10}},
 		{"External/unknown/all", "", false, []float64{1, 1, 1, 1, 1, 1}},
-		{"External/f1.com/all", scope, false, []float64{2, 4, 3, 1, 3, 10}},
-		{"External/unknown/all", scope, false, []float64{1, 1, 1, 1, 1, 1}},
+		{"External/f1.com/all", tr.FinalName, false, []float64{2, 4, 3, 1, 3, 10}},
+		{"External/unknown/all", tr.FinalName, false, []float64{1, 1, 1, 1, 1, 1}},
 	})
 }
 
 func TestSegmentDatastore(t *testing.T) {
 	start := time.Date(2014, time.November, 28, 1, 1, 0, 0, time.UTC)
-	tr := &Tracer{}
+	tr := &TxnData{}
 
 	t1 := StartSegment(tr, start.Add(1*time.Second))
 	t2 := StartSegment(tr, start.Add(2*time.Second))
@@ -414,8 +377,9 @@ func TestSegmentDatastore(t *testing.T) {
 		t.Error(tr.datastoreDuration)
 	}
 	metrics := newMetricTable(100, time.Now())
-	scope := "WebTransaction/Go/zip"
-	MergeBreakdownMetrics(tr, metrics, scope, true)
+	tr.FinalName = "WebTransaction/Go/zip"
+	tr.IsWeb = true
+	MergeBreakdownMetrics(tr, metrics)
 	ExpectMetrics(t, metrics, []WantMetric{
 		{"Datastore/all", "", true, []float64{4, 6, 5, 1, 3, 12}},
 		{"Datastore/allWeb", "", true, []float64{4, 6, 5, 1, 3, 12}},
@@ -424,18 +388,17 @@ func TestSegmentDatastore(t *testing.T) {
 		{"Datastore/Unknown/all", "", true, []float64{1, 1, 1, 1, 1, 1}},
 		{"Datastore/Unknown/allWeb", "", true, []float64{1, 1, 1, 1, 1, 1}},
 		{"Datastore/operation/MySQL/SELECT", "", false, []float64{3, 5, 4, 1, 3, 11}},
-		{"Datastore/operation/MySQL/SELECT", scope, false, []float64{2, 4, 3, 1, 3, 10}},
+		{"Datastore/operation/MySQL/SELECT", tr.FinalName, false, []float64{2, 4, 3, 1, 3, 10}},
 		{"Datastore/operation/Unknown/other", "", false, []float64{1, 1, 1, 1, 1, 1}},
-		{"Datastore/operation/Unknown/other", scope, false, []float64{1, 1, 1, 1, 1, 1}},
+		{"Datastore/operation/Unknown/other", tr.FinalName, false, []float64{1, 1, 1, 1, 1, 1}},
 		{"Datastore/statement/MySQL/my_table/SELECT", "", false, []float64{1, 1, 1, 1, 1, 1}},
-		{"Datastore/statement/MySQL/my_table/SELECT", scope, false, []float64{1, 1, 1, 1, 1, 1}},
-		{"Datastore/instance/MySQL/unknown/unknown", "", false, []float64{3, 5, 4, 1, 3, 11}},
-		{"Datastore/instance/Unknown/unknown/unknown", "", false, []float64{1, 1, 1, 1, 1, 1}},
+		{"Datastore/statement/MySQL/my_table/SELECT", tr.FinalName, false, []float64{1, 1, 1, 1, 1, 1}},
 	})
 
 	metrics = newMetricTable(100, time.Now())
-	scope = "OtherTransaction/Go/zip"
-	MergeBreakdownMetrics(tr, metrics, scope, false)
+	tr.FinalName = "OtherTransaction/Go/zip"
+	tr.IsWeb = false
+	MergeBreakdownMetrics(tr, metrics)
 	ExpectMetrics(t, metrics, []WantMetric{
 		{"Datastore/all", "", true, []float64{4, 6, 5, 1, 3, 12}},
 		{"Datastore/allOther", "", true, []float64{4, 6, 5, 1, 3, 12}},
@@ -444,13 +407,11 @@ func TestSegmentDatastore(t *testing.T) {
 		{"Datastore/Unknown/all", "", true, []float64{1, 1, 1, 1, 1, 1}},
 		{"Datastore/Unknown/allOther", "", true, []float64{1, 1, 1, 1, 1, 1}},
 		{"Datastore/operation/MySQL/SELECT", "", false, []float64{3, 5, 4, 1, 3, 11}},
-		{"Datastore/operation/MySQL/SELECT", scope, false, []float64{2, 4, 3, 1, 3, 10}},
+		{"Datastore/operation/MySQL/SELECT", tr.FinalName, false, []float64{2, 4, 3, 1, 3, 10}},
 		{"Datastore/operation/Unknown/other", "", false, []float64{1, 1, 1, 1, 1, 1}},
-		{"Datastore/operation/Unknown/other", scope, false, []float64{1, 1, 1, 1, 1, 1}},
+		{"Datastore/operation/Unknown/other", tr.FinalName, false, []float64{1, 1, 1, 1, 1, 1}},
 		{"Datastore/statement/MySQL/my_table/SELECT", "", false, []float64{1, 1, 1, 1, 1, 1}},
-		{"Datastore/statement/MySQL/my_table/SELECT", scope, false, []float64{1, 1, 1, 1, 1, 1}},
-		{"Datastore/instance/MySQL/unknown/unknown", "", false, []float64{3, 5, 4, 1, 3, 11}},
-		{"Datastore/instance/Unknown/unknown/unknown", "", false, []float64{1, 1, 1, 1, 1, 1}},
+		{"Datastore/statement/MySQL/my_table/SELECT", tr.FinalName, false, []float64{1, 1, 1, 1, 1, 1}},
 	})
 }
 
@@ -485,7 +446,7 @@ func TestDatastoreInstancesCrossAgent(t *testing.T) {
 			tc.DBHostname = "localhost"
 		}
 
-		tr := &Tracer{}
+		tr := &TxnData{}
 		s := StartSegment(tr, start)
 		EndDatastoreSegment(EndDatastoreParams{
 			Tracer:       tr,
@@ -499,11 +460,12 @@ func TestDatastoreInstancesCrossAgent(t *testing.T) {
 		})
 
 		expect := strings.Replace(tc.ExpectedMetric,
-			tc.SystemHostname, thisHost, -1)
+			tc.SystemHostname, ThisHost, -1)
 
 		metrics := newMetricTable(100, time.Now())
-		scope := "OtherTransaction/Go/zip"
-		MergeBreakdownMetrics(tr, metrics, scope, false)
+		tr.FinalName = "OtherTransaction/Go/zip"
+		tr.IsWeb = false
+		MergeBreakdownMetrics(tr, metrics)
 		data := []float64{1, 1, 1, 1, 1, 1}
 		ExpectMetrics(ExtendValidator(t, tc.Name), metrics, []WantMetric{
 			{"Datastore/all", "", true, data},
@@ -512,7 +474,7 @@ func TestDatastoreInstancesCrossAgent(t *testing.T) {
 			{"Datastore/" + tc.Product + "/allOther", "", true, data},
 			{"Datastore/operation/" + tc.Product + "/SELECT", "", false, data},
 			{"Datastore/statement/" + tc.Product + "/my_table/SELECT", "", false, data},
-			{"Datastore/statement/" + tc.Product + "/my_table/SELECT", scope, false, data},
+			{"Datastore/statement/" + tc.Product + "/my_table/SELECT", tr.FinalName, false, data},
 			{expect, "", false, data},
 		})
 	}

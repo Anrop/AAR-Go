@@ -16,26 +16,25 @@ func TestGetStackTrace(t *testing.T) {
 	}
 }
 
-func TestSimplifyStackTraceFilename(t *testing.T) {
-	tcs := []struct {
-		Input  string
-		Expect string
-	}{
-		{"", ""},
-		{"zop.go", "zop.go"},
-		{"/zip/zop.go", "/zip/zop.go"},
-		{"/gopath/src/zip/zop.go", "zip/zop.go"},
-		{"/gopath/src/zip/src/zop.go", "zip/src/zop.go"},
-		{"/gopath/src/zip/zop.go", "zip/zop.go"},
-		{"/日本/src/日本/zop.go", "日本/zop.go"},
-		{"/src/", ""},
-		{"/src/zop.go", "zop.go"},
+func TestLongStackTrace(t *testing.T) {
+	st := StackTrace(make([]uintptr, maxStackTraceFrames+20))
+	js, err := json.Marshal(st)
+	if nil != err {
+		t.Fatal(err)
 	}
-
-	for _, tc := range tcs {
-		out := simplifyStackTraceFilename(tc.Input)
-		if out != tc.Expect {
-			t.Error(tc.Input, tc.Expect, out)
-		}
+	expect := `[
+	{},{},{},{},{},{},{},{},{},{},
+	{},{},{},{},{},{},{},{},{},{},
+	{},{},{},{},{},{},{},{},{},{},
+	{},{},{},{},{},{},{},{},{},{},
+	{},{},{},{},{},{},{},{},{},{},
+	{},{},{},{},{},{},{},{},{},{},
+	{},{},{},{},{},{},{},{},{},{},
+	{},{},{},{},{},{},{},{},{},{},
+	{},{},{},{},{},{},{},{},{},{},
+	{},{},{},{},{},{},{},{},{},{}
+	]`
+	if string(js) != CompactJSONString(expect) {
+		t.Error(string(js))
 	}
 }
