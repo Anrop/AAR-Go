@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/gorilla/mux"
 )
@@ -22,7 +23,8 @@ func outputEvents(missionID int, limit int, offset int, w http.ResponseWriter) e
 		SELECT
 			id,
 			data,
-			timestamp
+			timestamp,
+			type
 		FROM events
 		WHERE mission_id = $1
 		ORDER BY timestamp ASC
@@ -48,11 +50,14 @@ func outputEvents(missionID int, limit int, offset int, w http.ResponseWriter) e
 		}
 
 		event := Event{}
-		err := rows.Scan(&event.ID, &event.Data, &event.Timestamp)
+		err := rows.Scan(&event.ID, &event.Data, &event.Timestamp, &event.Type)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error reading event row from database: %v", err)
 			continue
 		}
+
+		// Remove Rails prefix from Type
+		event.Type = strings.Replace(event.Type, "Events::", "", 1)
 
 		// Move properties inline to event object
 		event.Player = event.Data.Player
