@@ -12,6 +12,7 @@ type Mission struct {
 
 type Event struct {
 	ID         int32       `json:"id"`
+	Type       string      `json:"type"`
 	Data       *EventData  `json:"data,omitempty"`
 	Timestamp  time.Time   `json:"timestamp"`
 	Player     *Player     `json:"player,omitempty"`
