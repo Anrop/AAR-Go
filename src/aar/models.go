@@ -53,6 +53,7 @@ type Unit struct {
 	Name      string   `json:"name"`
 	Position  Position `json:"position"`
 	Side      string   `json:"side"`
+	VehicleID string   `json:"vehicle_id"`
 }
 
 type Vehicle struct {
