@@ -20,14 +20,6 @@ _cgo_export.*
 _testmain.go
 
 *.exe
-*.test
 
-# gb specific folders
-/bin/
-/pkg/
-
-# Dotenv file
-.env
-
-# Binary
-AAR-Go
+conn_config_test.go
+.envrc

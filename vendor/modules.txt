@@ -1,0 +1,26 @@
+# github.com/gorilla/context v1.1.1
+github.com/gorilla/context
+# github.com/gorilla/handlers v1.3.0
+github.com/gorilla/handlers
+# github.com/gorilla/mux v0.0.0-20171208160815-5ab525f4fb16
+github.com/gorilla/mux
+# github.com/jackc/pgx v0.0.0-20171209171835-b0c3e7e8b107
+github.com/jackc/pgx
+github.com/jackc/pgx/internal/sanitize
+github.com/jackc/pgx/pgio
+github.com/jackc/pgx/pgproto3
+github.com/jackc/pgx/pgtype
+github.com/jackc/pgx/chunkreader
+# github.com/joho/godotenv v0.0.0-20171110010315-6d367c18edf6
+github.com/joho/godotenv/autoload
+github.com/joho/godotenv
+# github.com/newrelic/go-agent v1.11.0
+github.com/newrelic/go-agent
+github.com/newrelic/go-agent/internal
+github.com/newrelic/go-agent/internal/logger
+github.com/newrelic/go-agent/internal/utilization
+github.com/newrelic/go-agent/internal/cat
+github.com/newrelic/go-agent/internal/jsonx
+github.com/newrelic/go-agent/internal/sysinfo
+# github.com/pkg/errors v0.0.0-20171216070316-e881fd58d78e
+github.com/pkg/errors
