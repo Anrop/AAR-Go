@@ -85,6 +85,7 @@ func outputMissionPlayers(missionID int, w http.ResponseWriter) error {
 	return outputPlayersFromRows(rows, w)
 }
 
+// PlayersHandler is used to handle the players endpoint
 func PlayersHandler(w http.ResponseWriter, r *http.Request) {
 	if newRelic != nil {
 		txn := (*newRelic).StartTransaction(r.URL.Path, w, r)
@@ -97,6 +98,7 @@ func PlayersHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// MissionPlayersHandler is used to handle the mission players endpoint
 func MissionPlayersHandler(w http.ResponseWriter, r *http.Request) {
 	if newRelic != nil {
 		txn := (*newRelic).StartTransaction(r.URL.Path, w, r)

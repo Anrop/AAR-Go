@@ -2,6 +2,7 @@ package aar
 
 import "time"
 
+// Mission data structure
 type Mission struct {
 	ID        int32     `json:"id"`
 	CreatedAt time.Time `json:"created_at"`
@@ -10,6 +11,7 @@ type Mission struct {
 	World     string    `json:"world"`
 }
 
+// Event data structure
 type Event struct {
 	ID         int32       `json:"id"`
 	Type       string      `json:"type"`
@@ -21,6 +23,7 @@ type Event struct {
 	Vehicle    *Vehicle    `json:"vehicle,omitempty"`
 }
 
+// EventData data structure
 type EventData struct {
 	Player     *Player     `json:"player,omitempty"`
 	Projectile *Projectile `json:"projectile,omitempty"`
@@ -28,11 +31,13 @@ type EventData struct {
 	Vehicle    *Vehicle    `json:"vehicle,omitempty"`
 }
 
+// Player data structure
 type Player struct {
 	Name string `json:"name"`
 	UID  string `json:"uid"`
 }
 
+// Position data structure
 type Position struct {
 	Dir float64 `json:"dir"`
 	X   float64 `json:"x"`
@@ -40,6 +45,7 @@ type Position struct {
 	Z   float64 `json:"z"`
 }
 
+// Projectile data structure
 type Projectile struct {
 	ID         string   `json:"id"`
 	Position   Position `json:"position"`
@@ -47,6 +53,7 @@ type Projectile struct {
 	Simulation string   `json:"simulation"`
 }
 
+// Unit data structure
 type Unit struct {
 	ID        string   `json:"id"`
 	LifeState string   `json:"life_state"`
@@ -56,6 +63,7 @@ type Unit struct {
 	VehicleID string   `json:"vehicle_id"`
 }
 
+// Vehicle data structure
 type Vehicle struct {
 	ID         string   `json:"id"`
 	Name       string   `json:"name"`

@@ -74,6 +74,7 @@ func outputEvents(missionID int, limit int, offset int, w http.ResponseWriter) e
 	return nil
 }
 
+// EventsHandler is used to handle the events endpoint
 func EventsHandler(w http.ResponseWriter, r *http.Request) {
 	if newRelic != nil {
 		txn := (*newRelic).StartTransaction(r.URL.Path, w, r)
