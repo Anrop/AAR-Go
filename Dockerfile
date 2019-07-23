@@ -2,7 +2,7 @@ FROM golang:1.12-alpine AS builder
 RUN apk --no-cache add git
 WORKDIR /build/
 COPY . /build/
-RUN GO111MODULE=on go build -mod=vendor
+RUN GO111MODULE=on go build
 
 FROM alpine:latest
 WORKDIR /app/

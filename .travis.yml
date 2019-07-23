@@ -14,7 +14,6 @@ install:
   - go get golang.org/x/lint/golint
 
 script:
-  - go build -mod=vendor
+  - go build
   - golint -set_exit_status src/...
-  - diff -u <(echo -n) <(gofmt -d internal/)
-  - diff -u <(echo -n) <(gofmt -d main.go)
+  - diff -u <(echo -n) <(gofmt -d .)
