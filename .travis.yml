@@ -15,5 +15,5 @@ install:
 
 script:
   - go build
-  - golint -set_exit_status src/...
+  - golint -set_exit_status ./...
   - diff -u <(echo -n) <(gofmt -d .)
