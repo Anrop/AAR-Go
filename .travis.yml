@@ -8,9 +8,9 @@ matrix:
 
 install:
   - go get golang.org/x/lint/golint
-  - go get github.com/constabulary/gb/...
 
 script:
-  - gb build
+  - go build -mod=vendor
   - golint -set_exit_status src/...
-  - diff -u <(echo -n) <(gofmt -d src/)
+  - diff -u <(echo -n) <(gofmt -d internal/)
+  - diff -u <(echo -n) <(gofmt -d main.go)
