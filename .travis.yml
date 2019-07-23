@@ -6,6 +6,10 @@ go:
 matrix:
   fast_finish: true
 
+env:
+  global:
+    GO111MODULE=on
+
 install:
   - go get golang.org/x/lint/golint
 
