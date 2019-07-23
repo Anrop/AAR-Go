@@ -12,5 +12,5 @@ install:
 
 script:
   - gb build
-  - golint src/
+  - golint -set_exit_status src/...
   - diff -u <(echo -n) <(gofmt -d src/)

@@ -13,6 +13,7 @@ var (
 	newRelic *newrelic.Application
 )
 
+// SetupNewRelic sets up monitoring in NewRelic
 func SetupNewRelic(licenseKey string) {
 	config := newrelic.NewConfig(appName, licenseKey)
 

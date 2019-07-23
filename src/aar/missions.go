@@ -144,6 +144,7 @@ func outputMission(missionID string, w http.ResponseWriter) error {
 	return json.NewEncoder(w).Encode(mission)
 }
 
+// MissionsHandler is used to handle the missions endpoint
 func MissionsHandler(w http.ResponseWriter, r *http.Request) {
 	if newRelic != nil {
 		txn := (*newRelic).StartTransaction(r.URL.Path, w, r)
@@ -156,6 +157,7 @@ func MissionsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// PlayerMissionsHandler is used to handle players endpoint
 func PlayerMissionsHandler(w http.ResponseWriter, r *http.Request) {
 	if newRelic != nil {
 		txn := (*newRelic).StartTransaction(r.URL.Path, w, r)
@@ -171,6 +173,7 @@ func PlayerMissionsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// MissionHandler is used to handle the mission endpoint
 func MissionHandler(w http.ResponseWriter, r *http.Request) {
 	if newRelic != nil {
 		txn := (*newRelic).StartTransaction(r.URL.Path, w, r)
