@@ -10,7 +10,7 @@ management.
 
 ## How To Use
 
-Download all dependencies and compile the sources with `go build`.
+Use `go build` to download all dependencies and compile the sources.
 
 Start the API with the `AAR-Go` binary.
 Server will be available at `$PORT`.
