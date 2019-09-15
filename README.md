@@ -4,18 +4,22 @@ Simple API that returns missions and events recorded by the AAR Server
 
 ## Requirements
 
-Code is written in [Go](https://golang.org/) and uses [gb](https://getgb.io/) to compile
+Code is written in [Go](https://golang.org/) and uses [Go modules](https://github.com/golang/go/wiki/Modules) for dependency management
 
 ## How To Use
 
-Compile the sources with `gb build`
+Use `go build` to download all dependencies and compile the sources.
+
+Start the API with the `AAR-Go` binary.
+Server will be available at `$PORT`.
+
+## Environment Variables
 
 Environment variables can be specified in `.env` file and will be autoloaded
 
-Set `DATABASE_URL` as a postgres url to your AAR DATABASE_URL
 
-`MAX_DATABASE_CONNECTIONS` can be defined and is 2 by default
-
-`PORT` can be defined and is 8080 by default
-
-Start the API with the aar binary in the bin folder
+| Key | Required | Description |
+| --- | -------- | ----------- |
+| DATABASE_URL | Yes | Postgres URL to your AAR Database |
+| MAX_DATABASE_CONNECTIONS` | No | 2 by default |
+| PORT | No | Port that HTTP Server is bound to. 8080 by default |

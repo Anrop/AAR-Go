@@ -1,0 +1,9 @@
+.dockerignore
+.env
+.git
+.gitignore
+.travis.yml
+bin
+docker-compose.yml
+Dockerfile
+AAR-Go

@@ -28,3 +28,6 @@ _testmain.go
 
 # Dotenv file
 .env
+
+# Binary
+AAR-Go

@@ -6,11 +6,14 @@ go:
 matrix:
   fast_finish: true
 
+env:
+  global:
+    GO111MODULE=on
+
 install:
   - go get golang.org/x/lint/golint
-  - go get github.com/constabulary/gb/...
 
 script:
-  - gb build
-  - golint -set_exit_status src/...
-  - diff -u <(echo -n) <(gofmt -d src/)
+  - go build
+  - golint -set_exit_status ./...
+  - diff -u <(echo -n) <(gofmt -d .)
