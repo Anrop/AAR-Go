@@ -4,9 +4,7 @@ Simple API that returns missions and events recorded by the AAR Server
 
 ## Requirements
 
-Code is written in [Go](https://golang.org/) and uses
-[Go modules](https://github.com/golang/go/wiki/Modules) for dependency
-management.
+Code is written in [Go](https://golang.org/) and uses [Go modules](https://github.com/golang/go/wiki/Modules) for dependency management
 
 ## How To Use
 
