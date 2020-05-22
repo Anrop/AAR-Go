@@ -4,18 +4,22 @@ go 1.12
 
 require (
 	github.com/cockroachdb/apd v1.1.0 // indirect
-	github.com/gorilla/context v1.1.1 // indirect
-	github.com/gorilla/handlers v1.3.0
-	github.com/gorilla/mux v0.0.0-20171208160815-5ab525f4fb16
-	github.com/hashicorp/go-version v1.2.0 // indirect
+	github.com/gofrs/uuid v3.3.0+incompatible // indirect
+	github.com/golang/protobuf v1.4.2 // indirect
+	github.com/gorilla/handlers v1.4.2
+	github.com/gorilla/mux v1.7.4
 	github.com/jackc/fake v0.0.0-20150926172116-812a484cc733 // indirect
-	github.com/jackc/pgx v0.0.0-20171209171835-b0c3e7e8b107
-	github.com/joho/godotenv v0.0.0-20171110010315-6d367c18edf6
-	github.com/kr/pretty v0.1.0 // indirect
+	github.com/jackc/pgx v3.6.2+incompatible
+	github.com/joho/godotenv v1.3.0
 	github.com/lib/pq v1.2.0 // indirect
-	github.com/newrelic/go-agent v1.11.0
-	github.com/pkg/errors v0.0.0-20171216070316-e881fd58d78e // indirect
-	github.com/satori/go.uuid v1.2.0 // indirect
+	github.com/newrelic/go-agent/v3 v3.5.0
+	github.com/newrelic/go-agent/v3/integrations/nrgorilla v1.1.0
+	github.com/pkg/errors v0.9.1 // indirect
 	github.com/shopspring/decimal v0.0.0-20180709203117-cd690d0c9e24 // indirect
-	gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127 // indirect
+	golang.org/x/crypto v0.0.0-20200510223506-06a226fb4e37 // indirect
+	golang.org/x/net v0.0.0-20200520182314-0ba52f642ac2 // indirect
+	golang.org/x/sys v0.0.0-20200519105757-fe76b779f299 // indirect
+	golang.org/x/text v0.3.2 // indirect
+	google.golang.org/genproto v0.0.0-20200521103424-e9a78aa275b7 // indirect
+	google.golang.org/grpc v1.29.1 // indirect
 )

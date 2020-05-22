@@ -2,9 +2,10 @@ package aar
 
 import (
 	"fmt"
+	"github.com/gorilla/mux"
+	"github.com/newrelic/go-agent/v3/integrations/nrgorilla"
+	"github.com/newrelic/go-agent/v3/newrelic"
 	"os"
-
-	newrelic "github.com/newrelic/go-agent"
 )
 
 const appName = "AAR"
@@ -14,15 +15,17 @@ var (
 )
 
 // SetupNewRelic sets up monitoring in NewRelic
-func SetupNewRelic(licenseKey string) {
-	config := newrelic.NewConfig(appName, licenseKey)
-
-	var err error
-	newRelicApp, err := newrelic.NewApplication(config)
-	newRelic = &newRelicApp
+func SetupNewRelic(licenseKey string, r *mux.Router) {
+	app, err := newrelic.NewApplication(
+		newrelic.ConfigAppName(appName),
+		newrelic.ConfigLicense(licenseKey),
+	)
 
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error starting New Relic: %q", err)
 		os.Exit(1)
 	}
+
+	newRelic = app
+	r.Use(nrgorilla.Middleware(app))
 }

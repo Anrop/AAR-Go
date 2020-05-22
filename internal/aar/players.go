@@ -87,11 +87,6 @@ func outputMissionPlayers(missionID int, w http.ResponseWriter) error {
 
 // PlayersHandler is used to handle the players endpoint
 func PlayersHandler(w http.ResponseWriter, r *http.Request) {
-	if newRelic != nil {
-		txn := (*newRelic).StartTransaction(r.URL.Path, w, r)
-		defer txn.End()
-	}
-
 	if err := outputPlayers(w); err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		fmt.Fprintf(os.Stderr, "Error reading missions: %v", err)
@@ -100,11 +95,6 @@ func PlayersHandler(w http.ResponseWriter, r *http.Request) {
 
 // MissionPlayersHandler is used to handle the mission players endpoint
 func MissionPlayersHandler(w http.ResponseWriter, r *http.Request) {
-	if newRelic != nil {
-		txn := (*newRelic).StartTransaction(r.URL.Path, w, r)
-		defer txn.End()
-	}
-
 	params := mux.Vars(r)
 	missionID, err := strconv.Atoi(params["missionId"])
 	if err != nil {

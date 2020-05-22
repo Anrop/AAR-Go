@@ -42,6 +42,11 @@ func main() {
 	}
 
 	r := mux.NewRouter()
+
+	if newRelicLicenseKey != "" {
+		aar.SetupNewRelic(newRelicLicenseKey, r)
+	}
+
 	r.HandleFunc("/missions", aar.MissionsHandler)
 	r.HandleFunc("/missions/{missionId}", aar.MissionHandler)
 	r.HandleFunc("/missions/{missionId}/events", aar.EventsHandler)
@@ -52,10 +57,6 @@ func main() {
 	var handler http.Handler
 	handler = handlers.CORS()(r)
 	handler = handlers.CompressHandler(handler)
-
-	if newRelicLicenseKey != "" {
-		aar.SetupNewRelic(newRelicLicenseKey)
-	}
 
 	// Bind to a port and pass our router in
 	http.ListenAndServe(":"+port, handler)
