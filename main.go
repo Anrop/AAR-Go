@@ -1,45 +1,34 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
-	"strconv"
 
 	"github.com/Anrop/AAR-Go/internal/aar"
 
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
-	"github.com/jackc/pgx"
+	"github.com/jackc/pgx/v4/pgxpool"
 	_ "github.com/joho/godotenv/autoload"
 )
 
 func main() {
 	port := os.Getenv("PORT")
 	databaseURL := os.Getenv("DATABASE_URL")
-	maxDatabaseConnections, _ := strconv.Atoi(os.Getenv("MAX_DATABASE_CONNECTIONS"))
 	newRelicLicenseKey := os.Getenv("NEW_RELIC_LICENSE_KEY")
 
 	if port == "" {
 		port = "8080"
 	}
 
-	var err error
-	pgConfig, err := pgx.ParseURI(databaseURL)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Invalid database url: %q", err)
-		os.Exit(1)
-	}
-
-	poolConfig := pgx.ConnPoolConfig{
-		ConnConfig:     pgConfig,
-		MaxConnections: maxDatabaseConnections,
-	}
-	aar.DB, err = pgx.NewConnPool(poolConfig)
+	db, err := pgxpool.Connect(context.Background(), databaseURL)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error opening database: %q", err)
 		os.Exit(1)
 	}
+	aar.DB = db
 
 	r := mux.NewRouter()
 

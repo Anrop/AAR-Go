@@ -1,6 +1,7 @@
 package aar
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,7 +12,7 @@ import (
 	"github.com/gorilla/mux"
 )
 
-func outputEvents(missionID int, limit int, offset int, w http.ResponseWriter) error {
+func outputEvents(ctx context.Context, missionID int, limit int, offset int, w http.ResponseWriter) error {
 	// nil value for limitStr queries all events
 	var limitStr *string
 	if limit > 0 {
@@ -19,7 +20,7 @@ func outputEvents(missionID int, limit int, offset int, w http.ResponseWriter) e
 		limitStr = &limitVal
 	}
 
-	rows, err := DB.Query(`
+	rows, err := DB.Query(ctx, `
 		SELECT
 			id,
 			data,
@@ -87,7 +88,7 @@ func EventsHandler(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 
-	if err := outputEvents(missionID, limit, offset, w); err != nil {
+	if err := outputEvents(r.Context(), missionID, limit, offset, w); err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		fmt.Fprintf(os.Stderr, "Error reading events: %v", err)
 	}
