@@ -1,10 +1,10 @@
 package aar
 
 import (
-	"github.com/jackc/pgx"
+	"github.com/jackc/pgx/v4/pgxpool"
 )
 
 var (
 	// DB is the pool for database connections
-	DB *pgx.ConnPool
+	DB *pgxpool.Pool
 )

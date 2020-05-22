@@ -1,16 +1,17 @@
 package aar
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 
 	"github.com/gorilla/mux"
-	"github.com/jackc/pgx"
+	"github.com/jackc/pgx/v4"
 )
 
-func outputMissionsFromRows(rows *pgx.Rows, w http.ResponseWriter) error {
+func outputMissionsFromRows(rows pgx.Rows, w http.ResponseWriter) error {
 	enc := json.NewEncoder(w)
 	w.Write([]byte("["))
 
@@ -38,8 +39,8 @@ func outputMissionsFromRows(rows *pgx.Rows, w http.ResponseWriter) error {
 	return nil
 }
 
-func outputMissions(w http.ResponseWriter) error {
-	rows, err := DB.Query(`
+func outputMissions(ctx context.Context, w http.ResponseWriter) error {
+	rows, err := DB.Query(ctx, `
 		SELECT
 			id,
 			created_at,
@@ -72,8 +73,8 @@ func outputMissions(w http.ResponseWriter) error {
 	return outputMissionsFromRows(rows, w)
 }
 
-func outputPlayerMissions(playerID string, w http.ResponseWriter) error {
-	rows, err := DB.Query(`
+func outputPlayerMissions(ctx context.Context, playerID string, w http.ResponseWriter) error {
+	rows, err := DB.Query(ctx, `
 		SELECT
 			missions.id,
 			missions.created_at,
@@ -109,8 +110,8 @@ func outputPlayerMissions(playerID string, w http.ResponseWriter) error {
 	return outputMissionsFromRows(rows, w)
 }
 
-func outputMission(missionID string, w http.ResponseWriter) error {
-	row := DB.QueryRow(`
+func outputMission(ctx context.Context, missionID string, w http.ResponseWriter) error {
+	row := DB.QueryRow(ctx, `
 		SELECT
 			id,
 			created_at,
@@ -146,7 +147,7 @@ func outputMission(missionID string, w http.ResponseWriter) error {
 
 // MissionsHandler is used to handle the missions endpoint
 func MissionsHandler(w http.ResponseWriter, r *http.Request) {
-	if err := outputMissions(w); err != nil {
+	if err := outputMissions(r.Context(), w); err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		fmt.Fprintf(os.Stderr, "Error reading missions: %v", err)
 	}
@@ -157,7 +158,7 @@ func PlayerMissionsHandler(w http.ResponseWriter, r *http.Request) {
 	params := mux.Vars(r)
 	playerID := params["playerId"]
 
-	if err := outputPlayerMissions(playerID, w); err != nil {
+	if err := outputPlayerMissions(r.Context(), playerID, w); err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		fmt.Fprintf(os.Stderr, "Error reading missions: %v", err)
 	}
@@ -168,7 +169,7 @@ func MissionHandler(w http.ResponseWriter, r *http.Request) {
 	params := mux.Vars(r)
 	missionID := params["missionId"]
 
-	if err := outputMission(missionID, w); err != nil {
+	if err := outputMission(r.Context(), missionID, w); err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		fmt.Fprintf(os.Stderr, "Error reading mission: %v", err)
 	}

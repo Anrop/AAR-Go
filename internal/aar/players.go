@@ -1,6 +1,7 @@
 package aar
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -8,10 +9,10 @@ import (
 	"strconv"
 
 	"github.com/gorilla/mux"
-	"github.com/jackc/pgx"
+	"github.com/jackc/pgx/v4"
 )
 
-func outputPlayersFromRows(rows *pgx.Rows, w http.ResponseWriter) error {
+func outputPlayersFromRows(rows pgx.Rows, w http.ResponseWriter) error {
 	enc := json.NewEncoder(w)
 	w.Write([]byte("["))
 
@@ -39,8 +40,8 @@ func outputPlayersFromRows(rows *pgx.Rows, w http.ResponseWriter) error {
 	return nil
 }
 
-func outputPlayers(w http.ResponseWriter) error {
-	rows, err := DB.Query(`
+func outputPlayers(ctx context.Context, w http.ResponseWriter) error {
+	rows, err := DB.Query(ctx, `
 		SELECT
 			data #>> '{player, name}' as name,
 			data #>> '{player, uid}' as uid
@@ -61,8 +62,8 @@ func outputPlayers(w http.ResponseWriter) error {
 	return outputPlayersFromRows(rows, w)
 }
 
-func outputMissionPlayers(missionID int, w http.ResponseWriter) error {
-	rows, err := DB.Query(`
+func outputMissionPlayers(ctx context.Context, missionID int, w http.ResponseWriter) error {
+	rows, err := DB.Query(ctx, `
 		SELECT
 			data #>> '{player, name}' as name,
 			data #>> '{player, uid}' as uid
@@ -87,7 +88,7 @@ func outputMissionPlayers(missionID int, w http.ResponseWriter) error {
 
 // PlayersHandler is used to handle the players endpoint
 func PlayersHandler(w http.ResponseWriter, r *http.Request) {
-	if err := outputPlayers(w); err != nil {
+	if err := outputPlayers(r.Context(), w); err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		fmt.Fprintf(os.Stderr, "Error reading missions: %v", err)
 	}
@@ -103,7 +104,7 @@ func MissionPlayersHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := outputMissionPlayers(missionID, w); err != nil {
+	if err := outputMissionPlayers(r.Context(), missionID, w); err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		fmt.Fprintf(os.Stderr, "Error reading players: %v", err)
 	}
