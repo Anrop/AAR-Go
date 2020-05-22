@@ -1,6 +1,6 @@
 module github.com/Anrop/AAR-Go
 
-go 1.12
+go 1.14
 
 require (
 	github.com/cockroachdb/apd v1.1.0 // indirect

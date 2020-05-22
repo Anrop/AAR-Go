@@ -1,4 +1,4 @@
-FROM golang:1.12-alpine AS builder
+FROM golang:1.14-alpine AS builder
 RUN apk --no-cache add git
 WORKDIR /build/
 COPY . /build/
